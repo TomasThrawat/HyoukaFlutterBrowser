@@ -11,6 +11,28 @@ const _maxHistoryItems = 100;
 const _downloadChannel = MethodChannel('hyouka.browser/native_downloads');
 const _adBlockKey = 'ad_block_enabled';
 
+const _extraBlockedDomains = <String>[
+  'doubleclick.net',
+  'googlesyndication.com',
+  'googleadservices.com',
+  'adnxs.com',
+  'adsrvr.org',
+  'advertising.com',
+  'amazon-adsystem.com',
+  'criteo.com',
+  'taboola.com',
+  'outbrain.com',
+  'pubmatic.com',
+  'rubiconproject.com',
+  'openx.net',
+  'scorecardresearch.com',
+  'quantserve.com',
+  'casalemedia.com',
+  'demdex.net',
+  'mathtag.com',
+  'rlcdn.com',
+];
+
 Uri resolveBrowserInput(String value) {
   final input = value.trim();
   if (input.isEmpty) {
@@ -95,6 +117,7 @@ Future<void> main() async {
   await AdBlockerWebviewController.instance.initialize(
     FilterConfig(
       filterTypes: [FilterType.easyList, FilterType.adGuard],
+      blockedDomains: _extraBlockedDomains,
     ),
   );
 
@@ -155,12 +178,11 @@ class _BrowserPageState extends State<BrowserPage> {
 
   Timer? _downloadPoller;
   int progress = 0;
-  bool canBack = false;
-  bool canForward = false;
   bool _adBlockEnabled = true;
   bool _googleFallbackUsed = false;
   String? _pendingGoogleSearch;
-
+  int _blockedResourceCount = 0;
+  
   @override
   void initState() {
     super.initState();
@@ -186,6 +208,68 @@ class _BrowserPageState extends State<BrowserPage> {
     });
     await prefs.setBool(_adBlockKey, next);
     await controller.reload();
+  }
+
+  void _showAdBlockStats() {
+    final stats = controller.statistics;
+    final entries = stats.blockedDomains.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.black,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _adBlockEnabled ? 'Ad blocker: ON' : 'Ad blocker: OFF',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Blocked resources: ' +
+                      stats.blockedResourceCount.toString(),
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                Text(
+                  'Hidden ad rules: ' + stats.cssRulesAppliedCount.toString(),
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                if (entries.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Top blocked domains',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  ...entries.take(5).map(
+                    (entry) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Text(
+                        entry.key + '  •  ' + entry.value.toString(),
+                        style: const TextStyle(color: Colors.white54),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _loadHistory() async {
@@ -221,20 +305,6 @@ class _BrowserPageState extends State<BrowserPage> {
     await prefs.remove(_historyKey);
   }
 
-  Future<void> _syncNavigation() async {
-    final back = await controller.canGoBack();
-    final forward = await controller.canGoForward();
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      canBack = back;
-      canForward = forward;
-    });
-  }
-
   Future<void> _search(String value) async {
     final input = value.trim();
     if (input.isEmpty) {
@@ -253,10 +323,14 @@ class _BrowserPageState extends State<BrowserPage> {
     }
 
     await controller.loadUrl(target.toString());
-    await _syncNavigation();
   }
 
-  Future<void> _handleLoadFinished(Uri url) async {
+  Future<void> _handleLoadFinished(String? rawUrl) async {
+    final url = Uri.tryParse(rawUrl ?? '');
+    if (url == null) {
+      return;
+    }
+
     if (url.host == 'www.google.com' &&
         url.path == '/search' &&
         !_googleFallbackUsed) {
@@ -270,7 +344,7 @@ class _BrowserPageState extends State<BrowserPage> {
         final query = _pendingGoogleSearch ?? url.queryParameters['q'];
         if (query != null && query.isNotEmpty && mounted) {
           _googleFallbackUsed = true;
-          _pendingGoogleSearch = null;
+              _pendingGoogleSearch = null;
           final fallback =
               'https://www.bing.com/search?q=' + Uri.encodeQueryComponent(query);
           await controller.loadUrl(fallback);
@@ -287,6 +361,7 @@ class _BrowserPageState extends State<BrowserPage> {
     setState(() {
       progress = 100;
       address.text = url.toString();
+      _blockedResourceCount = controller.statistics.blockedResourceCount;
     });
     _recordHistory(url.toString());
     _syncNavigation();
@@ -294,24 +369,6 @@ class _BrowserPageState extends State<BrowserPage> {
 
   Future<void> _reload() async {
     await controller.reload();
-    await _syncNavigation();
-  }
-
-  Future<void> _goBack() async {
-    if (!canBack) {
-      return;
-    }
-
-    await controller.goBack();
-    await _syncNavigation();
-  }
-
-  Future<void> _goForward() async {
-    if (!canForward) {
-      return;
-    }
-
-    await controller.goForward();
     await _syncNavigation();
   }
 
@@ -694,7 +751,6 @@ class _BrowserPageState extends State<BrowserPage> {
                     setState(() {
                       address.text = url.toString();
                     });
-                    _syncNavigation();
                   },
                   onProgress: (value) {
                     if (!mounted) {
@@ -762,18 +818,54 @@ class _BrowserPageState extends State<BrowserPage> {
                       icon: const Icon(Icons.history_rounded),
                     ),
                     _downloadButton(),
-                    IconButton(
-                      tooltip: _adBlockEnabled
-                          ? 'Disable ad blocker'
-                          : 'Enable ad blocker',
-                      onPressed: _toggleAdBlock,
-                      icon: Icon(
-                        _adBlockEnabled
-                            ? Icons.shield_rounded
-                            : Icons.shield_outlined,
-                        color:
-                            _adBlockEnabled ? Colors.white : Colors.white38,
-                      ),
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        IconButton(
+                          tooltip: _adBlockEnabled
+                              ? 'Disable ad blocker'
+                              : 'Enable ad blocker',
+                          onPressed: _toggleAdBlock,
+                          onLongPress: _showAdBlockStats,
+                          icon: Icon(
+                            _adBlockEnabled
+                                ? Icons.shield_rounded
+                                : Icons.shield_outlined,
+                            color:
+                                _adBlockEnabled ? Colors.white : Colors.white38,
+                          ),
+                        ),
+                        if (_adBlockEnabled && _blockedResourceCount > 0)
+                          Positioned(
+                            right: 4,
+                            top: 2,
+                            child: IgnorePointer(
+                              child: Container(
+                                constraints: const BoxConstraints(
+                                  minWidth: 16,
+                                  minHeight: 16,
+                                ),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 3),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  _blockedResourceCount > 999
+                                      ? '999+'
+                                      : '$_blockedResourceCount',
+                                  style: const TextStyle(
+                                    color: Colors.black,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     IconButton(
                       tooltip: 'Refresh',
