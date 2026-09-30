@@ -12,9 +12,13 @@ const _downloadsKey = 'browser_downloads';
 const _maxHistoryItems = 100;
 const _downloadChannel = MethodChannel('hyouka.browser/native_downloads');
 const _adBlockKey = 'ad_block_enabled';
+const _browserUserAgent = 'Mozilla/5.0 (Linux; Android 12; CPH2095) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
 
 const _extraBlockedDomains = <String>[
   'click.a-ads.com',
+  'inthedungeons123.lol',
+  'nexus-nexus-ba.github.io',
+  'readilyprobablechow.shop',
   'doubleclick.net',
   'googlesyndication.com',
   'googleadservices.com',
@@ -240,7 +244,8 @@ class DownloadItem {
 }
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsFlutterBind
+ing.ensureInitialized();
 
   await AdBlockerWebviewController.instance.initialize(
     FilterConfig(
@@ -311,6 +316,7 @@ class _BrowserPageState extends State<BrowserPage> {
   bool _downloadPollInProgress = false;
   bool _backStepInProgress = false;
   int progress = 0;
+  String? _lastPageUrl;
   bool _adBlockEnabled = true;
   bool _googleFallbackUsed = false;
   String? _pendingGoogleSearch;
@@ -449,7 +455,8 @@ class _BrowserPageState extends State<BrowserPage> {
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
                     ),
-                  ),
+              
+    ),
                   const SizedBox(height: 4),
                   ...entries.take(5).map(
                     (entry) => Padding(
@@ -560,6 +567,7 @@ class _BrowserPageState extends State<BrowserPage> {
       address.text = url.toString();
       _blockedResourceCount = controller.statistics.blockedResourceCount;
     });
+    _lastPageUrl = url.toString();
     _recordHistory(url.toString());
   }
 
@@ -595,6 +603,7 @@ class _BrowserPageState extends State<BrowserPage> {
     }
 
     final fileName = downloadFileName(uri);
+    final referer = _lastPageUrl;
 
     try {
       final nativeId = await _downloadChannel.invokeMethod<int>(
@@ -602,6 +611,8 @@ class _BrowserPageState extends State<BrowserPage> {
         <String, dynamic>{
           'url': key,
           'fileName': fileName,
+          'referer': referer,
+          'userAgent': _browserUserAgent,
         },
       );
 
@@ -684,7 +695,8 @@ class _BrowserPageState extends State<BrowserPage> {
           item.progress = nextStatus == 'Completed' ? 100 : nextProgress;
           item.error = data['reason']?.toString();
         });
-        _downloadRevision.value++;
+        _down
+loadRevision.value++;
         } on PlatformException catch (error) {
           if (!mounted) {
             continue;
@@ -831,7 +843,8 @@ class _BrowserPageState extends State<BrowserPage> {
                                           ),
                                         ],
                                       ),
-                                    );
+                     
+               );
                                   } else {
                                     leading = Icon(
                                       item.status == 'Completed'
@@ -964,7 +977,8 @@ class _BrowserPageState extends State<BrowserPage> {
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(color: Colors.white),
                               ),
-                              onTap: () {
+                        
+      onTap: () {
                                 Navigator.of(context).pop();
                                 _search(url);
                               },
@@ -1109,6 +1123,9 @@ class _BrowserPageState extends State<BrowserPage> {
                     });
                     final parsedUrl = url == null ? null : Uri.tryParse(url);
                     if (parsedUrl != null) {
+                      if (!isLikelyDownloadUrl(parsedUrl)) {
+                        _lastPageUrl = parsedUrl.toString();
+                      }
                       unawaited(_trackDownloadUrl(parsedUrl));
                     }
                   },
@@ -1145,6 +1162,7 @@ class _BrowserPageState extends State<BrowserPage> {
                         enableSuggestions: false,
                         maxLines: 1,
                         style: const TextStyle(color: Colors.white),
+
                         onSubmitted: _search,
                         decoration: InputDecoration(
                           hintText: 'Search or enter address',
