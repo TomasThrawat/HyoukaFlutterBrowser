@@ -50,7 +50,6 @@ void main() {
     );
   });
 
-
   test('APK URLs are recognized as downloads', () {
     expect(
       isLikelyDownloadUrl(

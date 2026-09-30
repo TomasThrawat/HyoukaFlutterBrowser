@@ -108,6 +108,48 @@ String _normalizeDownloadFileName(String value) {
   return result;
 }
 
+bool isLikelyDownloadUrl(Uri uri) {
+    const downloadableExtensions = <String>{
+      'apk',
+      'zip',
+      'rar',
+      '7z',
+      'pdf',
+      'doc',
+      'docx',
+      'xls',
+      'xlsx',
+      'ppt',
+      'pptx',
+      'csv',
+      'txt',
+      'mp3',
+      'wav',
+      'm4a',
+      'mp4',
+      'mkv',
+      'avi',
+      'mov',
+      'jpg',
+      'jpeg',
+      'png',
+      'gif',
+      'webp',
+    };
+
+    final lastSegment =
+        uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.toLowerCase();
+    final extensionIndex = lastSegment.lastIndexOf('.');
+    final extension =
+        extensionIndex >= 0 ? lastSegment.substring(extensionIndex + 1) : '';
+    final hasDownloadQuery = uri.queryParameters.keys.any(
+      (key) => key.toLowerCase() == 'download',
+    );
+
+    return downloadableExtensions.contains(extension) || hasDownloadQuery;
+  }
+
+
 String downloadFileName(Uri uri) {
   final segment =
       uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.trim();
@@ -404,48 +446,7 @@ class _BrowserPageState extends State<BrowserPage> {
     await controller.reload();
   }
 
-    bool _isLikelyDownloadUrl(Uri uri) {
-    const downloadableExtensions = <String>{
-      'apk',
-      'zip',
-      'rar',
-      '7z',
-      'pdf',
-      'doc',
-      'docx',
-      'xls',
-      'xlsx',
-      'ppt',
-      'pptx',
-      'csv',
-      'txt',
-      'mp3',
-      'wav',
-      'm4a',
-      'mp4',
-      'mkv',
-      'avi',
-      'mov',
-      'jpg',
-      'jpeg',
-      'png',
-      'gif',
-      'webp',
-    };
-
-    final lastSegment =
-        uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.toLowerCase();
-    final extensionIndex = lastSegment.lastIndexOf('.');
-    final extension =
-        extensionIndex >= 0 ? lastSegment.substring(extensionIndex + 1) : '';
-    final hasDownloadQuery = uri.queryParameters.keys.any(
-      (key) => key.toLowerCase() == 'download',
-    );
-
-    return downloadableExtensions.contains(extension) || hasDownloadQuery;
-  }
-
-  Future<void> _trackDownloadUrl(Uri uri) async {
+    Future<void> _trackDownloadUrl(Uri uri) async {
     if (!_isLikelyDownloadUrl(uri)) {
       return;
     }
@@ -740,9 +741,12 @@ class _BrowserPageState extends State<BrowserPage> {
                       return;
                     }
                     setState(() {
-                      address.text = url.toString();
+                      address.text = url?.toString() ?? '';
                     });
-                    unawaited(_trackDownloadUrl(url));
+                    final parsedUrl = url == null ? null : Uri.tryParse(url);
+                    if (parsedUrl != null) {
+                      unawaited(_trackDownloadUrl(parsedUrl));
+                    }
                   },
                   onProgress: (value) {
                     if (!mounted) {
