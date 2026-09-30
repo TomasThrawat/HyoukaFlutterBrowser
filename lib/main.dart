@@ -9,6 +9,7 @@ const homeUrl = 'https://www.google.com/';
 const _historyKey = 'browser_history';
 const _maxHistoryItems = 100;
 const _downloadChannel = MethodChannel('hyouka.browser/native_downloads');
+const _adBlockKey = 'ad_block_enabled';
 
 Uri resolveBrowserInput(String value) {
   final input = value.trim();
@@ -156,12 +157,35 @@ class _BrowserPageState extends State<BrowserPage> {
   int progress = 0;
   bool canBack = false;
   bool canForward = false;
+  bool _adBlockEnabled = true;
+  bool _googleFallbackUsed = false;
+  String? _pendingGoogleSearch;
 
   @override
   void initState() {
     super.initState();
     controller.resetStatistics();
     _loadHistory();
+    _loadAdBlockPreference();
+  }
+
+  Future<void> _loadAdBlockPreference() async {
+    final saved = await prefs.getBool(_adBlockKey);
+    if (!mounted || saved == null) {
+      return;
+    }
+    setState(() {
+      _adBlockEnabled = saved;
+    });
+  }
+
+  Future<void> _toggleAdBlock() async {
+    final next = !_adBlockEnabled;
+    setState(() {
+      _adBlockEnabled = next;
+    });
+    await prefs.setBool(_adBlockKey, next);
+    await controller.reload();
   }
 
   Future<void> _loadHistory() async {
@@ -220,8 +244,52 @@ class _BrowserPageState extends State<BrowserPage> {
     final target = resolveBrowserInput(input);
     focus.unfocus();
 
+    if (target.host == 'www.google.com' && target.path == '/search') {
+      _pendingGoogleSearch = target.queryParameters['q'];
+      _googleFallbackUsed = false;
+    } else {
+      _pendingGoogleSearch = null;
+      _googleFallbackUsed = false;
+    }
+
     await controller.loadUrl(target.toString());
     await _syncNavigation();
+  }
+
+  Future<void> _handleLoadFinished(Uri url) async {
+    if (url.host == 'www.google.com' &&
+        url.path == '/search' &&
+        !_googleFallbackUsed) {
+      final title = (await controller.getTitle() ?? '').toLowerCase();
+      final challenge = title.contains('unusual traffic') ||
+          title.contains('about this page') ||
+          title.contains('معلومات عن هذه الصفحة') ||
+          title.contains('حركة مرور غير معتادة');
+
+      if (challenge) {
+        final query = _pendingGoogleSearch ?? url.queryParameters['q'];
+        if (query != null && query.isNotEmpty && mounted) {
+          _googleFallbackUsed = true;
+          _pendingGoogleSearch = null;
+          final fallback =
+              'https://www.bing.com/search?q=' + Uri.encodeQueryComponent(query);
+          await controller.loadUrl(fallback);
+          _showMessage('Google طلب تحقق للشبكة، تم تحويل البحث تلقائياً.');
+          return;
+        }
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      progress = 100;
+      address.text = url.toString();
+    });
+    _recordHistory(url.toString());
+    _syncNavigation();
   }
 
   Future<void> _reload() async {
@@ -598,94 +666,17 @@ class _BrowserPageState extends State<BrowserPage> {
       body: SafeArea(
         child: Column(
           children: [
-            if (progress > 0 && progress < 100)
-              LinearProgressIndicator(
-                value: progress / 100,
-                minHeight: 2,
-                backgroundColor: Colors.black,
-              )
-            else
-              const SizedBox(height: 2),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Back',
-                    onPressed: canBack ? _goBack : null,
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    color: canBack ? Colors.white : Colors.white24,
-                  ),
-                  IconButton(
-                    tooltip: 'Forward',
-                    onPressed: canForward ? _goForward : null,
-                    icon: const Icon(Icons.arrow_forward_rounded),
-                    color: canForward ? Colors.white : Colors.white24,
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: address,
-                      focusNode: focus,
-                      keyboardType: TextInputType.url,
-                      textInputAction: TextInputAction.search,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      maxLines: 1,
-                      style: const TextStyle(color: Colors.white),
-                      onSubmitted: _search,
-                      decoration: InputDecoration(
-                        hintText: 'Search or enter address',
-                        hintStyle: const TextStyle(color: Colors.white38),
-                        filled: true,
-                        fillColor: Colors.black,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        prefixIcon: const Icon(
-                          Icons.search_rounded,
-                          color: Colors.white54,
-                        ),
-                        suffixIcon: IconButton(
-                          tooltip: 'Search',
-                          onPressed: _searchFromField,
-                          icon: const Icon(
-                            Icons.arrow_upward_rounded,
-                            color: Colors.white,
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide: const BorderSide(color: Colors.white24),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(18),
-                          borderSide: const BorderSide(color: Colors.white54),
-                        ),
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'History',
-                    onPressed: _showHistory,
-                    icon: const Icon(Icons.history_rounded),
-                  ),
-                  _downloadButton(),
-                  IconButton(
-                    tooltip: 'Refresh',
-                    onPressed: _reload,
-                    icon: const Icon(Icons.refresh_rounded),
-                  ),
-                ],
-              ),
-            ),
             Expanded(
               child: ColoredBox(
                 color: Colors.black,
                 child: AdBlockerWebview(
                   url: Uri.parse(homeUrl),
-                  shouldBlockAds: true,
+                  shouldBlockAds: _adBlockEnabled,
                   adBlockerWebviewController: controller,
+                  userAgent:
+                      'Mozilla/5.0 (Linux; Android 12; CPH2095) '
+                      'AppleWebKit/537.36 (KHTML, like Gecko) '
+                      'Chrome/140.0.0.0 Mobile Safari/537.36',
                   onLoadStart: (url) {
                     if (!mounted) {
                       return;
@@ -695,17 +686,7 @@ class _BrowserPageState extends State<BrowserPage> {
                       address.text = url.toString();
                     });
                   },
-                  onLoadFinished: (url) {
-                    if (!mounted) {
-                      return;
-                    }
-                    setState(() {
-                      progress = 100;
-                      address.text = url.toString();
-                    });
-                    _recordHistory(url.toString());
-                    _syncNavigation();
-                  },
+                  onLoadFinished: _handleLoadFinished,
                   onUrlChanged: (url) {
                     if (!mounted) {
                       return;
@@ -724,11 +705,87 @@ class _BrowserPageState extends State<BrowserPage> {
                 ),
               ),
             ),
+            if (progress > 0 && progress < 100)
+              LinearProgressIndicator(
+                value: progress / 100,
+                minHeight: 2,
+                backgroundColor: Colors.black,
+              )
+            else
+              const SizedBox(height: 2),
+            Material(
+              color: Colors.black,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: address,
+                        focusNode: focus,
+                        keyboardType: TextInputType.url,
+                        textInputAction: TextInputAction.search,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        maxLines: 1,
+                        style: const TextStyle(color: Colors.white),
+                        onSubmitted: _search,
+                        decoration: InputDecoration(
+                          hintText: 'Search or enter address',
+                          hintStyle: const TextStyle(color: Colors.white38),
+                          filled: true,
+                          fillColor: Colors.black,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          prefixIcon: const Icon(
+                            Icons.search_rounded,
+                            color: Colors.white54,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(18),
+                            borderSide:
+                                const BorderSide(color: Colors.white24),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(18),
+                            borderSide:
+                                const BorderSide(color: Colors.white54),
+                          ),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'History',
+                      onPressed: _showHistory,
+                      icon: const Icon(Icons.history_rounded),
+                    ),
+                    _downloadButton(),
+                    IconButton(
+                      tooltip: _adBlockEnabled
+                          ? 'Disable ad blocker'
+                          : 'Enable ad blocker',
+                      onPressed: _toggleAdBlock,
+                      icon: Icon(
+                        _adBlockEnabled
+                            ? Icons.shield_rounded
+                            : Icons.shield_outlined,
+                        color:
+                            _adBlockEnabled ? Colors.white : Colors.white38,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Refresh',
+                      onPressed: _reload,
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
-  }
-
-  Future<void> _searchFromField() => _search(address.text);
-}
+  }}
