@@ -52,72 +52,137 @@ if missing_main:
 
 MAIN.write_text(source)
 
+
 pubcache = Path.home() / ".pub-cache" / "hosted" / "pub.dev"
-candidates = sorted(pubcache.glob("adblocker_webview-2.3.0"))
-if len(candidates) != 1:
+
+android_candidates = sorted(pubcache.glob("webview_flutter_android-4.14.1"))
+if len(android_candidates) != 1:
     raise SystemExit(
-        "Expected exactly one adblocker_webview-2.3.0 package, found "
-        + str(len(candidates))
+        "Expected exactly one webview_flutter_android-4.14.1 package, found "
+        + str(len(android_candidates))
     )
 
-widget = candidates[0] / "lib" / "src" / "adblocker_webview.dart"
+android_controller = (
+    android_candidates[0] / "lib" / "src" / "android_webview_controller.dart"
+)
+if not android_controller.is_file():
+    raise SystemExit(
+        "webview_flutter_android controller source not found: "
+        + str(android_controller)
+    )
+
+controller_source = android_controller.read_text()
+if "Future<void> setDownloadListener(" not in controller_source:
+    controller_method = r"""
+  /// Registers a callback for native Android WebView downloads.
+  Future<void> setDownloadListener(
+    void Function(
+      String url,
+      String userAgent,
+      String contentDisposition,
+      String mimetype,
+      int contentLength,
+    )? onDownloadStart,
+  ) async {
+    if (onDownloadStart == null) {
+      await _webView.setDownloadListener(null);
+      return;
+    }
+
+    final listener = android_webview.DownloadListener()
+      ..onDownloadStart = onDownloadStart;
+    await _webView.setDownloadListener(listener);
+  }
+
+"""
+    anchor = """  @override
+  Future<void> runJavaScript(String javaScript) {
+"""
+    if anchor not in controller_source:
+        raise SystemExit("webview_flutter_android controller insertion anchor not found")
+    controller_source = controller_source.replace(
+        anchor, controller_method + anchor, 1
+    )
+
+for required in (
+    "Future<void> setDownloadListener(",
+    "android_webview.DownloadListener()",
+    "_webView.setDownloadListener(listener)",
+):
+    if required not in controller_source:
+        raise SystemExit("Android controller patch incomplete: " + required)
+android_controller.write_text(controller_source)
+
+adblock_candidates = sorted(pubcache.glob("adblocker_webview-2.3.0"))
+if len(adblock_candidates) != 1:
+    raise SystemExit(
+        "Expected exactly one adblocker_webview-2.3.0 package, found "
+        + str(len(adblock_candidates))
+    )
+
+widget = adblock_candidates[0] / "lib" / "src" / "adblocker_webview.dart"
 if not widget.is_file():
-    raise SystemExit("adblocker_webview 2.3.0 widget source not found: " + str(widget))
+    raise SystemExit("adblocker_webview widget source not found: " + str(widget))
 
 w = widget.read_text()
 
 if "this.onDownloadStart," not in w:
-    constructor_anchor = "    this.onUrlChanged,\n"
+    constructor_anchor = "    this.onUrlChanged,
+"
     if constructor_anchor not in w:
-        raise SystemExit("DownloadListener constructor anchor not found")
+        raise SystemExit("adblocker constructor anchor not found")
     w = w.replace(
         constructor_anchor,
-        "    this.onUrlChanged,\n    this.onDownloadStart,\n",
+        constructor_anchor + "    this.onDownloadStart,
+",
         1,
     )
 
-if "final DownloadListener? onDownloadStart;" not in w:
-    field_anchor = "  final void Function(String? url)? onUrlChanged;\n"
-    if field_anchor not in w:
-        raise SystemExit("DownloadListener field anchor not found")
-    w = w.replace(
-        field_anchor,
-        field_anchor
-        + "\n"
-        + "  /// Invoked when Android WebView reports a download request.\n"
-        + "  final DownloadListener? onDownloadStart;\n",
-        1,
-    )
+callback_field = r"""  /// Invoked when Android WebView reports a download request.
+  final void Function(
+    String url,
+    String userAgent,
+    String contentDisposition,
+    String mimetype,
+    int contentLength,
+  )? onDownloadStart;
+"""
+old_field = "  final DownloadListener? onDownloadStart;
+"
+field_anchor = "  final void Function(String? url)? onUrlChanged;
+"
+if callback_field not in w:
+    if old_field in w:
+        w = w.replace(old_field, callback_field, 1)
+    elif field_anchor in w:
+        w = w.replace(field_anchor, field_anchor + "
+" + callback_field, 1)
+    else:
+        raise SystemExit("adblocker download callback field anchor not found")
 
-listener_block = """    if (_webViewController.platform is AndroidWebViewController &&
+listener_call = r"""    if (_webViewController.platform is AndroidWebViewController &&
         widget.onDownloadStart != null) {
       await (_webViewController.platform as AndroidWebViewController)
           .setDownloadListener(widget.onDownloadStart);
     }
-
 """
 if "setDownloadListener(widget.onDownloadStart)" not in w:
-    platform_anchor = """    if (_webViewController.platform is AndroidWebViewController) {
-      unawaited(AndroidWebViewController.enableDebugging(kDebugMode));
-      unawaited(
-        (_webViewController.platform as AndroidWebViewController)
-            .setMediaPlaybackRequiresUserGesture(true),
-      );
-    }
-
-"""
-    if platform_anchor not in w:
-        raise SystemExit("Android WebView initialization anchor not found")
-    w = w.replace(platform_anchor, platform_anchor + listener_block, 1)
+    nav_anchor = "    _setNavigationDelegate();
+"
+    if nav_anchor not in w:
+        raise SystemExit("adblocker navigation delegate anchor not found")
+    w = w.replace(nav_anchor, nav_anchor + listener_call, 1)
 
 for required in (
     "this.onDownloadStart,",
-    "final DownloadListener? onDownloadStart;",
+    "final void Function(
+    String url,",
     "setDownloadListener(widget.onDownloadStart)",
 ):
     if required not in w:
-        raise SystemExit("Package patch incomplete: " + required)
+        raise SystemExit("adblocker patch incomplete: " + required)
 
 widget.write_text(w)
 print("Patched app source:", MAIN)
-print("Patched dependency:", widget)
+print("Patched Android controller:", android_controller)
+print("Patched adblocker widget:", widget)
