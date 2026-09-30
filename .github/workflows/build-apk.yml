@@ -1,1 +1,171 @@
-__WORKFLOW__
+name: Build Browser
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.vfs.watch=false
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: init.defaultBranch
+      GIT_CONFIG_VALUE_0: main
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Flutter Android wrapper
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/browser-platform
+          flutter create /tmp/browser-platform --platforms=android --org com.search --project-name browser
+          rm -rf android
+          cp -a /tmp/browser-platform/android ./android
+      - name: Apply launcher icon
+        run: |
+          set -euo pipefail
+          ICON=assets/pureblack_icon.png
+          test -s "$ICON"
+          RES=android/app/src/main/res
+          mkdir -p "$RES/drawable-nodpi" "$RES/mipmap-mdpi" "$RES/mipmap-hdpi" "$RES/mipmap-xhdpi" "$RES/mipmap-xxhdpi" "$RES/mipmap-xxxhdpi"
+          find "$RES" -type f \( -name 'ic_launcher*.png' -o -name 'ic_launcher*.webp' -o -name 'ic_launcher*.xml' \) -delete
+          cp "$ICON" "$RES/drawable-nodpi/browser_icon.png"
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            cp "$ICON" "$RES/mipmap-$density/ic_launcher.png"
+            cp "$ICON" "$RES/mipmap-$density/ic_launcher_round.png"
+          done
+      - name: Apply native Android download bridge
+        run: |
+          set -euo pipefail
+          NATIVE_DIR=android/app/src/main/kotlin/com/search/browser
+          test -s android_native/MainActivity.kt
+          test -s "$NATIVE_DIR/MainActivity.kt"
+          rm "$NATIVE_DIR/MainActivity.kt"
+          cp android_native/MainActivity.kt "$NATIVE_DIR/MainActivity.kt"
+      - name: Configure Gradle
+        run: printf '\norg.gradle.vfs.watch=false\n' >> android/gradle.properties
+      - name: Configure Android manifest
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("android/app/src/main/AndroidManifest.xml")
+          s=p.read_text()
+          perm='    <uses-permission android:name="android.permission.INTERNET" />'
+          if perm not in s:
+              marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+              s=s.replace(marker, marker+"\n"+perm, 1)
+          s=s.replace('android:label="browser"', 'android:label="Browser"')
+          p.write_text(s)
+          PY
+      - name: Verify source and identity
+        run: |
+          set -euo pipefail
+          NATIVE=android/app/src/main/kotlin/com/search/browser/MainActivity.kt
+          test -s "$NATIVE"
+          grep -q 'package com.search.browser' "$NATIVE"
+          grep -q 'class MainActivity' "$NATIVE"
+          grep -q 'MethodChannel' "$NATIVE"
+          grep -q 'DownloadManager' "$NATIVE"
+          grep -q 'addRequestHeader' "$NATIVE"
+          grep -q 'Referer' "$NATIVE"
+          grep -q 'Cookie' "$NATIVE"
+          grep -q 'User-Agent' "$NATIVE"
+          grep -q "readilyprobablechow.shop" lib/main.dart
+          grep -q "nexus-nexus-ba.github.io" lib/main.dart
+          grep -q "inthedungeons123.lol" lib/main.dart
+          grep -q "'referer': referer" lib/main.dart
+          grep -q "'userAgent': userAgent ?? _browserUserAgent" lib/main.dart
+          grep -q 'native_downloads' lib/main.dart
+          grep -q 'onDownloadStart:' lib/main.dart
+          grep -q "class BrowserApp" lib/main.dart
+          grep -q "title: 'Browser'" lib/main.dart
+          grep -q "Mozilla/5.0 (Linux; Android 12; CPH2095)" lib/main.dart
+          grep -q "Mobile Safari/537.36" lib/main.dart
+          ! grep -q "X11; Linux x86_64" lib/main.dart
+          ! grep -qE 'dio:|path_provider:' pubspec.yaml
+          test "$(find android/app/src/main/kotlin -name 'MainActivity.kt' -type f | wc -l)" -eq 1
+      - run: dart format lib test
+      - run: flutter pub get
+      - name: Apply browser hardening patch
+        run: |
+          set -euo pipefail
+          test -s tooling/patch_browser_build.py
+          python3 tooling/patch_browser_build.py
+      - name: Verify download listener patch
+        run: |
+          set -euo pipefail
+          PACKAGE_DIR="$HOME/.pub-cache/hosted/pub.dev/adblocker_webview-2.3.0"
+          ANDROID_PACKAGE_DIR="$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1"
+          test -f "$ANDROID_PACKAGE_DIR/lib/src/android_webview_controller.dart"
+          grep -q "Future<void> setOnDownloadStart(" "$ANDROID_PACKAGE_DIR/lib/src/android_webview_controller.dart"
+          grep -q "android_webview.DownloadListener(" "$ANDROID_PACKAGE_DIR/lib/src/android_webview_controller.dart"
+          grep -q "_webView.setDownloadListener(listener)" "$ANDROID_PACKAGE_DIR/lib/src/android_webview_controller.dart"
+          test -f "$PACKAGE_DIR/lib/src/adblocker_webview.dart"
+          grep -q "this.onDownloadStart" "$PACKAGE_DIR/lib/src/adblocker_webview.dart"
+          grep -q "final void Function(" "$PACKAGE_DIR/lib/src/adblocker_webview.dart"
+          grep -q "setOnDownloadStart(widget.onDownloadStart!)" "$PACKAGE_DIR/lib/src/adblocker_webview.dart"
+          grep -q "onDownloadStart:" lib/main.dart
+          grep -q "contentDispositionFileName(" lib/main.dart
+          grep -q "downloadFileNameFromMetadata(" lib/main.dart
+          grep -q "friendlyDownloadError(" lib/main.dart
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build arm64-v8a only
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64
+      - name: Verify release APK
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          test -s "$APK"
+          test "$(find build/app/outputs/flutter-apk -maxdepth 1 -name '*.apk' -type f | wc -l)" -eq 1
+          test -z "$(unzip -Z1 "$APK" | grep -E '^lib/(armeabi-v7a|x86|x86_64|mips|mips64)/' || true)"
+          test "$(unzip -Z1 "$APK" | grep -c '^lib/arm64-v8a/' || true)" -gt 0
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\n' "$BADGING" | grep -Fq "package: name='com.search.browser'"
+          printf '%s\n' "$BADGING" | grep -Fq "application-label:'Browser'"
+          sha256sum "$APK"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: browser-arm64-v8a
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version: //p' pubspec.yaml | cut -d+ -f1)"
+          TAG="v${VERSION}-build-${{ github.run_number }}"
+          for attempt in 1 2 3 4 5; do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "Release $TAG already exists."
+              exit 0
+            fi
+
+            if gh release create "$TAG"               build/app/outputs/flutter-apk/app-arm64-v8a-release.apk               --title "Browser $TAG"               --notes "Browser app; Google search; history; downloads; ad/tracker blocking; mobile-only Android browser user-agent; package com.search.browser; arm64-v8a only."
+            then
+              gh release view "$TAG" >/dev/null
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 5 ]; then
+              sleep $((attempt * 5))
+            fi
+          done
+
+          echo "GitHub release creation failed after 5 attempts."
+          exit 1
+
