@@ -16,9 +16,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
-
-      - name: Configure Git defaults
-        run: git config --global init.defaultBranch main
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: init.defaultBranch
+          GIT_CONFIG_VALUE_0: main
 
       - uses: actions/setup-java@v5
         with:
@@ -110,8 +111,9 @@ jobs:
 
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -q "package: name='com.hyouka.browser.hyouka_browser'"
-          "$AAPT" dump badging "$APK" | grep -q "application-label:'Hyouka Browser'"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\n' "$BADGING" | grep -Fq "package: name='com.hyouka.browser.hyouka_browser'"
+          printf '%s\n' "$BADGING" | grep -Fq "application-label:'Hyouka Browser'"
           sha256sum "$APK"
 
       - uses: actions/upload-artifact@v7
@@ -122,10 +124,10 @@ jobs:
 
       - name: GitHub release
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release create \
-            "v1.4.0-build-\${{ github.run_number }}" \
+            "v1.4.0-build-${{ github.run_number }}" \
             build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
-            --title "Hyouka Browser v1.4.0-build-\${{ github.run_number }}" \
+            --title "Hyouka Browser v1.4.0-build-${{ github.run_number }}" \
             --notes "Flutter UI/state + small Android DownloadManager bridge; pure black UI; search; history; EasyList/AdGuard blocking; visible download progress; arm64-v8a only."
