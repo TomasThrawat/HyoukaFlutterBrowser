@@ -18,6 +18,7 @@ import java.net.URL
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -29,6 +30,8 @@ class MainActivity : FlutterActivity() {
     private val requestMetadata = ConcurrentHashMap<Long, DownloadRequest>()
     private val fallbackJobs = ConcurrentHashMap<Long, FallbackJob>()
     private val fallbackExecutor = Executors.newCachedThreadPool()
+    private val managedDownloads = ConcurrentHashMap<Long, ManagedDownload>()
+    private val managedId = AtomicLong(System.currentTimeMillis())
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -38,6 +41,8 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "startDownload" -> startDownload(call, result)
                 "getDownloadStatus" -> getDownloadStatus(call, result)
+                "pauseDownload" -> pauseDownload(call, result)
+                "resumeDownload" -> resumeDownload(call, result)
                 "removeDownload" -> removeDownload(call, result)
                 else -> result.notImplemented()
             }
@@ -51,72 +56,33 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        val fileName = sanitizeFileName(call.argument<String>("fileName"))
-        val referer = call.argument<String>("referer")
-            ?.trim()
-            ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-        val userAgent = call.argument<String>("userAgent")
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: WebSettings.getDefaultUserAgent(this)
-        val mimeType = call.argument<String>("mimeType")
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
+        val request = DownloadRequest(
+            url = url,
+            fileName = sanitizeFileName(call.argument<String>("fileName")),
+            referer = call.argument<String>("referer")
+                ?.trim()
+                ?.takeIf { it.startsWith("http://") || it.startsWith("https://") },
+            userAgent = call.argument<String>("userAgent")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: WebSettings.getDefaultUserAgent(this),
+            mimeType = call.argument<String>("mimeType")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() },
+        )
 
-        try {
-            val cookieManager = CookieManager.getInstance()
-            cookieManager.flush()
-            val cookie = cookieManager.getCookie(url)
-
-            val request = DownloadManager.Request(Uri.parse(url))
-                .setTitle(fileName)
-                .setDescription("Browser download")
-                .setNotificationVisibility(
-                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                )
-                .setAllowedOverMetered(true)
-                .setAllowedOverRoaming(true)
-                .setDestinationInExternalPublicDir(
-                    Environment.DIRECTORY_DOWNLOADS,
-                    fileName,
-                )
-
-            if (!cookie.isNullOrBlank()) {
-                request.addRequestHeader("Cookie", cookie)
-            }
-
-            request.addRequestHeader("User-Agent", userAgent)
-            request.addRequestHeader("Accept", "*/*")
-            request.addRequestHeader(
-                "Accept-Language",
-                Locale.getDefault().toLanguageTag(),
-            )
-            if (referer != null && referer != url) {
-                request.addRequestHeader("Referer", referer)
-            }
-            if (mimeType != null) {
-                request.setMimeType(mimeType)
-            }
-
-            val id = downloadManager.enqueue(request)
-            requestMetadata[id] = DownloadRequest(
-                url = url,
-                fileName = fileName,
-                referer = referer,
-                userAgent = userAgent,
-                mimeType = mimeType,
-            )
-            result.success(id)
-        } catch (exception: Exception) {
-            result.error(
-                "DOWNLOAD_START_FAILED",
-                exception.message ?: "Could not start download.",
-                null,
-            )
+        val id = managedId.incrementAndGet()
+        val job = ManagedDownload(request)
+        managedDownloads[id] = job
+        job.running = true
+        fallbackExecutor.execute {
+            performManagedDownload(id, job)
         }
+        result.success(id)
     }
 
     private fun getDownloadStatus(call: MethodCall, result: MethodChannel.Result) {
+
         val id = call.arguments as? Number
         if (id == null) {
             result.error("INVALID_ID", "Download id is required.", null)
@@ -124,6 +90,10 @@ class MainActivity : FlutterActivity() {
         }
 
         val downloadId = id.toLong()
+        managedDownloads[downloadId]?.let {
+            result.success(it.toMap())
+            return
+        }
         fallbackJobs[downloadId]?.let {
             result.success(it.toMap())
             return
@@ -361,6 +331,267 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+
+    private fun pauseDownload(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.arguments as? Number
+        if (id == null) {
+            result.error("INVALID_ID", "Download id is required.", null)
+            return
+        }
+
+        val job = managedDownloads[id.toLong()]
+        if (job == null) {
+            result.error("NOT_FOUND", "Download is not managed by the resumable downloader.", null)
+            return
+        }
+
+        synchronized(job) {
+            when (job.status) {
+                "Queued", "Downloading" -> {
+                    job.paused = true
+                    job.status = "Paused"
+                    job.connection?.disconnect()
+                    result.success(true)
+                }
+                "Paused" -> result.success(true)
+                else -> result.success(false)
+            }
+        }
+    }
+
+    private fun resumeDownload(call: MethodCall, result: MethodChannel.Result) {
+        val id = call.arguments as? Number
+        if (id == null) {
+            result.error("INVALID_ID", "Download id is required.", null)
+            return
+        }
+
+        val downloadId = id.toLong()
+        val job = managedDownloads[downloadId]
+        if (job == null) {
+            result.error("NOT_FOUND", "Download is not managed by the resumable downloader.", null)
+            return
+        }
+
+        synchronized(job) {
+            if (job.status != "Paused") {
+                result.success(false)
+                return
+            }
+            job.paused = false
+            job.reason = null
+            if (!job.running) {
+                job.running = true
+                fallbackExecutor.execute {
+                    performManagedDownload(downloadId, job)
+                }
+            }
+            result.success(true)
+        }
+    }
+
+    private fun performManagedDownload(id: Long, job: ManagedDownload) {
+        var connection: HttpURLConnection? = null
+        var redirectCount = 0
+        var currentUrl = job.request.url
+        var currentReferer = job.request.referer
+
+        try {
+            synchronized(job) {
+                if (job.paused) {
+                    job.status = "Paused"
+                    job.running = false
+                    return
+                }
+                job.status = "Downloading"
+                job.reason = null
+            }
+
+            while (redirectCount <= 6) {
+                synchronized(job) {
+                    if (job.paused) {
+                        job.status = "Paused"
+                        job.running = false
+                        return
+                    }
+                }
+
+                val cookie = CookieManager.getInstance().getCookie(currentUrl)
+                val resumeFrom = job.receivedBytes
+
+                connection = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    instanceFollowRedirects = false
+                    connectTimeout = 20_000
+                    readTimeout = 30_000
+                    setRequestProperty("User-Agent", job.request.userAgent)
+                    setRequestProperty("Accept", "*/*")
+                    setRequestProperty("Accept-Language", Locale.getDefault().toLanguageTag())
+                    if (!cookie.isNullOrBlank()) {
+                        setRequestProperty("Cookie", cookie)
+                    }
+                    if (!currentReferer.isNullOrBlank() && currentReferer != currentUrl) {
+                        setRequestProperty("Referer", currentReferer)
+                    }
+                    if (resumeFrom > 0) {
+                        setRequestProperty("Range", "bytes=" + resumeFrom + "-")
+                    }
+                }
+                job.connection = connection
+
+                val responseCode = connection.responseCode
+
+                if (responseCode in 300..399) {
+                    val location = connection.getHeaderField("Location")
+                    if (location.isNullOrBlank() || redirectCount >= 6) {
+                        throw IllegalStateException("Redirect chain could not be completed.")
+                    }
+                    val nextUrl = URL(URL(currentUrl), location).toString()
+                    currentReferer = currentUrl
+                    currentUrl = nextUrl
+                    redirectCount++
+                    connection.disconnect()
+                    connection = null
+                    continue
+                }
+
+                if (responseCode == 403) {
+                    throw HttpException(403)
+                }
+                if (responseCode == 416 && resumeFrom > 0 && job.totalBytes > 0 && resumeFrom >= job.totalBytes) {
+                    completeManagedFile(job)
+                    return
+                }
+                if (responseCode !in 200..299) {
+                    throw HttpException(responseCode)
+                }
+
+                val append = resumeFrom > 0 && responseCode == HttpURLConnection.HTTP_PARTIAL
+                if (!append && resumeFrom > 0) {
+                    job.receivedBytes = 0
+                    job.totalBytes = 0
+                }
+
+                val responseType = connection.contentType
+                    ?.substringBefore(';')
+                    ?.trim()
+                val mimeType = job.request.mimeType
+                    ?: responseType
+                    ?: "application/octet-stream"
+                val contentLength = connection.contentLengthLong
+                val total = if (append && contentLength > 0) {
+                    resumeFrom + contentLength
+                } else {
+                    contentLength
+                }
+                if (total > 0) {
+                    job.totalBytes = total
+                }
+
+                ensureManagedFile(job, mimeType)
+
+                val outputUri = Uri.parse(requireNotNull(job.localUri))
+                val mode = if (append) "wa" else "wt"
+
+                connection.inputStream.use { input ->
+                    contentResolver.openOutputStream(outputUri, mode).use { output ->
+                        requireNotNull(output) { "Could not open the Downloads file." }
+                        val buffer = ByteArray(32 * 1024)
+                        while (true) {
+                            synchronized(job) {
+                                if (job.paused) {
+                                    job.status = "Paused"
+                                    return
+                                }
+                            }
+
+                            val count = input.read(buffer)
+                            if (count < 0) {
+                                break
+                            }
+                            output.write(buffer, 0, count)
+                            job.receivedBytes += count
+                        }
+                        output.flush()
+                    }
+                }
+
+                completeManagedFile(job)
+                return
+            }
+
+            throw IllegalStateException("Too many redirects.")
+        } catch (exception: HttpException) {
+            synchronized(job) {
+                if (job.paused) {
+                    job.status = "Paused"
+                } else {
+                    job.status = "Failed"
+                    job.reason = if (exception.code == 403) {
+                        "HTTP 403: Access denied."
+                    } else {
+                        "HTTP " + exception.code
+                    }
+                }
+            }
+        } catch (exception: Exception) {
+            synchronized(job) {
+                if (job.paused) {
+                    job.status = "Paused"
+                } else {
+                    job.status = "Failed"
+                    job.reason = exception.message ?: "Download failed."
+                }
+            }
+        } finally {
+            job.connection = null
+            connection?.disconnect()
+            job.running = false
+        }
+    }
+
+    private fun ensureManagedFile(job: ManagedDownload, mimeType: String) {
+        if (job.localUri != null) {
+            return
+        }
+
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
+            throw IllegalStateException("Downloads require Android 10 or newer.")
+        }
+
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, job.request.fileName)
+            put(MediaStore.Downloads.MIME_TYPE, mimeType)
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+
+        val uri = contentResolver.insert(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            values,
+        ) ?: throw IllegalStateException("Could not create the Downloads file.")
+
+        job.localUri = uri.toString()
+    }
+
+    private fun completeManagedFile(job: ManagedDownload) {
+        val uri = job.localUri?.let(Uri::parse)
+            ?: throw IllegalStateException("Download file is missing.")
+
+        contentResolver.update(
+            uri,
+            ContentValues().apply {
+                put(MediaStore.Downloads.IS_PENDING, 0)
+            },
+            null,
+            null,
+        )
+        synchronized(job) {
+            job.status = "Completed"
+            job.reason = null
+        }
+    }
+
     private fun removeDownload(call: MethodCall, result: MethodChannel.Result) {
         val id = call.arguments as? Number
         if (id == null) {
@@ -369,6 +600,17 @@ class MainActivity : FlutterActivity() {
         }
 
         val downloadId = id.toLong()
+        managedDownloads.remove(downloadId)?.let { job ->
+            synchronized(job) {
+                job.paused = true
+                job.connection?.disconnect()
+            }
+            job.localUri?.let { contentResolver.delete(Uri.parse(it), null, null) }
+            requestMetadata.remove(downloadId)
+            result.success(1)
+            return
+        }
+
         try {
             val removed = downloadManager.remove(downloadId)
             fallbackJobs.remove(downloadId)?.let { job ->
@@ -385,6 +627,27 @@ class MainActivity : FlutterActivity() {
                 null,
             )
         }
+    }
+
+    private class ManagedDownload(
+        val request: DownloadRequest,
+    ) {
+        @Volatile var status: String = "Queued"
+        @Volatile var paused: Boolean = false
+        @Volatile var running: Boolean = false
+        @Volatile var receivedBytes: Long = 0
+        @Volatile var totalBytes: Long = 0
+        @Volatile var reason: String? = null
+        @Volatile var localUri: String? = null
+        @Volatile var connection: HttpURLConnection? = null
+
+        fun toMap(): HashMap<String, Any?> = hashMapOf(
+            "status" to status,
+            "receivedBytes" to receivedBytes,
+            "totalBytes" to totalBytes,
+            "reason" to reason,
+            "localUri" to localUri,
+        )
     }
 
     private data class DownloadRequest(

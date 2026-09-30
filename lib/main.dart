@@ -891,6 +891,36 @@ class _BrowserPageState extends State<BrowserPage> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _toggleDownloadPause(DownloadItem item) async {
+    final shouldResume = item.status == 'Paused';
+    final method = shouldResume ? 'resumeDownload' : 'pauseDownload';
+
+    try {
+      final success = await _downloadChannel.invokeMethod<bool>(
+        method,
+        item.nativeId,
+      );
+      if (!mounted) {
+        return;
+      }
+
+      if (success == true) {
+        setState(() {
+          item.status = shouldResume ? 'Downloading' : 'Paused';
+          item.error = null;
+        });
+        _downloadRevision.value++;
+        unawaited(_saveDownloads());
+        if (shouldResume) {
+          _ensureDownloadPolling();
+          unawaited(_pollDownloads());
+        }
+      }
+    } on PlatformException catch (error) {
+      _showMessage(error.message ?? 'Could not change download state.');
+    }
+  }
+
   void _showDownloads() {
     showModalBottomSheet<void>(
       context: context,
@@ -1036,6 +1066,9 @@ class _BrowserPageState extends State<BrowserPage> {
                                               : item.status;
 
                                   return ListTile(
+                                    onTap: isActive || item.status == 'Paused'
+                                        ? () => unawaited(_toggleDownloadPause(item))
+                                        : null,
                                     contentPadding: const EdgeInsets.symmetric(
                                       horizontal: 0,
                                       vertical: 4,
@@ -1059,14 +1092,35 @@ class _BrowserPageState extends State<BrowserPage> {
                                         fontSize: 12,
                                       ),
                                     ),
-                                    trailing: isActive
-                                        ? Text(
-                                            percent.toString() + '%',
-                                            style: const TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w700,
-                                            ),
+                                    trailing: isActive || item.status == 'Paused'
+                                        ? Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                percent.toString() + '%',
+                                                style: const TextStyle(
+                                                  color: Colors.white70,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                              IconButton(
+                                                tooltip: item.status == 'Paused'
+                                                    ? 'Resume download'
+                                                    : 'Pause download',
+                                                onPressed: () =>
+                                                    unawaited(
+                                                  _toggleDownloadPause(item),
+                                                ),
+                                                icon: Icon(
+                                                  item.status == 'Paused'
+                                                      ? Icons.play_circle_outline_rounded
+                                                      : Icons.pause_circle_outline_rounded,
+                                                  color: Colors.white,
+                                                  size: 24,
+                                                ),
+                                              ),
+                                            ],
                                           )
                                         : const SizedBox.shrink(),
                                   );

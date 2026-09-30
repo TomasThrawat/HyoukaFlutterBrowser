@@ -120,6 +120,13 @@ jobs:
           grep -q "contentDispositionFileName(" lib/main.dart
           grep -q "downloadFileNameFromMetadata(" lib/main.dart
           grep -q "friendlyDownloadError(" lib/main.dart
+          grep -q "_toggleDownloadPause(" lib/main.dart
+          grep -q "pauseDownload" lib/main.dart
+          grep -q "resumeDownload" lib/main.dart
+          grep -q "pauseDownload" android_native/MainActivity.kt
+          grep -q "resumeDownload" android_native/MainActivity.kt
+          grep -q "Range" android_native/MainActivity.kt
+          grep -q "openOutputStream(outputUri, mode)" android_native/MainActivity.kt
       - run: flutter analyze
       - run: flutter test
       - name: Build arm64-v8a only
