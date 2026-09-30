@@ -21,7 +21,7 @@ ua_declaration = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/140.0.0.0 Mobile Safari/537.36';"
 )
-if "_browserUserAgent" not in source:
+if "const _browserUserAgent =" not in source:
     source = source.replace(
         "const _adBlockKey = 'ad_block_enabled';",
         "const _adBlockKey = 'ad_block_enabled';\n" + ua_declaration,

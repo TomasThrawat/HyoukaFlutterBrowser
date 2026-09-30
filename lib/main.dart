@@ -12,6 +12,7 @@ const _downloadsKey = 'browser_downloads';
 const _maxHistoryItems = 100;
 const _downloadChannel = MethodChannel('hyouka.browser/native_downloads');
 const _adBlockKey = 'ad_block_enabled';
+const _browserUserAgent = 'Mozilla/5.0 (Linux; Android 12; CPH2095) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36';
 
 const _extraBlockedDomains = <String>[
   'click.a-ads.com',
@@ -1253,10 +1254,7 @@ class _BrowserPageState extends State<BrowserPage> {
                   url: Uri.parse(homeUrl),
                   shouldBlockAds: _adBlockEnabled,
                   adBlockerWebviewController: controller,
-                  userAgent:
-                      'Mozilla/5.0 (Linux; Android 12; CPH2095) '
-                      'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/140.0.0.0 Mobile Safari/537.36',
+                  userAgent: _browserUserAgent,
                   onLoadStart: (url) {
                     if (!mounted) {
                       return;
