@@ -8,6 +8,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.vfs.watch=false
     steps:
       - name: Configure Git defaults
         run: |
@@ -28,10 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf /tmp/hyouka-browser-platform
-          flutter create /tmp/hyouka-browser-platform \
-            --platforms=android \
-            --org com.hyouka.browser \
-            --project-name hyouka_browser
+          flutter create /tmp/hyouka-browser-platform             --platforms=android             --org com.hyouka.browser             --project-name hyouka_browser
           rm -rf android
           cp -a /tmp/hyouka-browser-platform/android ./android
       - name: Configure Gradle for CI
