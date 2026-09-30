@@ -107,7 +107,7 @@ if "Future<void> setDownloadListener(" not in controller_source:
 
 for required in (
     "Future<void> setDownloadListener(",
-    "android_webview.DownloadListener()",
+    "android_webview.DownloadListener(",
     "_webView.setDownloadListener(listener)",
 ):
     if required not in controller_source:

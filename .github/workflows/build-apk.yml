@@ -110,7 +110,7 @@ jobs:
           ANDROID_PACKAGE_DIR="$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1"
           test -f "$ANDROID_PACKAGE_DIR/lib/src/android_webview_controller.dart"
           grep -q "Future<void> setDownloadListener(" "$ANDROID_PACKAGE_DIR/lib/src/android_webview_controller.dart"
-          grep -q "android_webview.DownloadListener()" "$ANDROID_PACKAGE_DIR/lib/src/android_webview_controller.dart"
+          grep -q "android_webview.DownloadListener(" "$ANDROID_PACKAGE_DIR/lib/src/android_webview_controller.dart"
           grep -q "_webView.setDownloadListener(listener)" "$ANDROID_PACKAGE_DIR/lib/src/android_webview_controller.dart"
           test -f "$PACKAGE_DIR/lib/src/adblocker_webview.dart"
           grep -q "this.onDownloadStart" "$PACKAGE_DIR/lib/src/adblocker_webview.dart"
