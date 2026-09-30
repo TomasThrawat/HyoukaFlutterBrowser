@@ -364,7 +364,6 @@ class _BrowserPageState extends State<BrowserPage> {
       _blockedResourceCount = controller.statistics.blockedResourceCount;
     });
     _recordHistory(url.toString());
-    _syncNavigation();
   }
 
   Future<void> _reload() async {
@@ -818,23 +817,25 @@ class _BrowserPageState extends State<BrowserPage> {
                       icon: const Icon(Icons.history_rounded),
                     ),
                     _downloadButton(),
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        IconButton(
-                          tooltip: _adBlockEnabled
-                              ? 'Disable ad blocker'
-                              : 'Enable ad blocker',
-                          onPressed: _toggleAdBlock,
-                          onLongPress: _showAdBlockStats,
-                          icon: Icon(
-                            _adBlockEnabled
-                                ? Icons.shield_rounded
-                                : Icons.shield_outlined,
-                            color:
-                                _adBlockEnabled ? Colors.white : Colors.white38,
+                    GestureDetector(
+                      onLongPress: _showAdBlockStats,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          IconButton(
+                            tooltip: _adBlockEnabled
+                                ? 'Disable ad blocker'
+                                : 'Enable ad blocker',
+                            onPressed: _toggleAdBlock,
+                            icon: Icon(
+                              _adBlockEnabled
+                                  ? Icons.shield_rounded
+                                  : Icons.shield_outlined,
+                              color: _adBlockEnabled
+                                  ? Colors.white
+                                  : Colors.white38,
+                            ),
                           ),
-                        ),
                         if (_adBlockEnabled && _blockedResourceCount > 0)
                           Positioned(
                             right: 4,
@@ -865,7 +866,8 @@ class _BrowserPageState extends State<BrowserPage> {
                               ),
                             ),
                           ),
-                      ],
+                        ],
+                      ),
                     ),
                     IconButton(
                       tooltip: 'Refresh',
