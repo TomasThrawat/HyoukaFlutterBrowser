@@ -72,10 +72,10 @@ if not android_controller.is_file():
     )
 
 controller_source = android_controller.read_text()
-if "Future<void> setDownloadListener(" not in controller_source:
+if "Future<void> setOnDownloadStart(" not in controller_source:
     controller_method = r"""
   /// Registers a callback for native Android WebView downloads.
-  Future<void> setDownloadListener(
+  Future<void> setOnDownloadStart(
     void Function(
       String url,
       String userAgent,
@@ -91,7 +91,7 @@ if "Future<void> setDownloadListener(" not in controller_source:
 
     final listener = android_webview.DownloadListener(
       onDownloadStart: (
-        android_webview.DownloadListener _,
+        _,
         String url,
         String userAgent,
         String contentDisposition,
@@ -121,7 +121,7 @@ if "Future<void> setDownloadListener(" not in controller_source:
     )
 
 for required in (
-    "Future<void> setDownloadListener(",
+    "Future<void> setOnDownloadStart(",
     "android_webview.DownloadListener(",
     "_webView.setDownloadListener(listener)",
 ):
@@ -141,18 +141,13 @@ if not widget.is_file():
     raise SystemExit("adblocker_webview widget source not found: " + str(widget))
 
 w = widget.read_text()
-
 if "this.onDownloadStart," not in w:
-    constructor_anchor = "    this.onUrlChanged," + chr(10)
-    if constructor_anchor not in w:
+    anchor = "    this.onUrlChanged," + chr(10)
+    if anchor not in w:
         raise SystemExit("adblocker constructor anchor not found")
-    w = w.replace(
-        constructor_anchor,
-        constructor_anchor + "    this.onDownloadStart," + chr(10),
-        1,
-    )
+    w = w.replace(anchor, anchor + "    this.onDownloadStart," + chr(10), 1)
 
-callback_field = """  /// Invoked when Android WebView reports a download request.
+field = """  /// Invoked when Android WebView reports a download request.
   final void Function(
     String url,
     String userAgent,
@@ -161,37 +156,31 @@ callback_field = """  /// Invoked when Android WebView reports a download reques
     int contentLength,
   )? onDownloadStart;
 """
-old_field = "  final DownloadListener? onDownloadStart;" + chr(10)
-field_anchor = "  final void Function(String? url)? onUrlChanged;" + chr(10)
-if callback_field not in w:
-    if old_field in w:
-        w = w.replace(old_field, callback_field, 1)
-    elif field_anchor in w:
-        w = w.replace(field_anchor, field_anchor + chr(10) + callback_field, 1)
-    else:
-        raise SystemExit("adblocker download callback field anchor not found")
+if field not in w:
+    anchor = "  final void Function(String? url)? onUrlChanged;" + chr(10)
+    if anchor not in w:
+        raise SystemExit("adblocker callback field anchor not found")
+    w = w.replace(anchor, anchor + chr(10) + field, 1)
 
 listener_call = """    if (_webViewController.platform is AndroidWebViewController &&
         widget.onDownloadStart != null) {
       await (_webViewController.platform as AndroidWebViewController)
-          .setDownloadListener(widget.onDownloadStart);
+          .setOnDownloadStart(widget.onDownloadStart!);
     }
+
 """
-if "setDownloadListener(widget.onDownloadStart)" not in w:
-    nav_anchor = "    _setNavigationDelegate();" + chr(10)
-    if nav_anchor not in w:
+if "setOnDownloadStart(widget.onDownloadStart!)" not in w:
+    anchor = "    _setNavigationDelegate();" + chr(10)
+    if anchor not in w:
         raise SystemExit("adblocker navigation delegate anchor not found")
-    w = w.replace(nav_anchor, nav_anchor + listener_call, 1)
+    w = w.replace(anchor, anchor + listener_call, 1)
 
 for required in (
     "this.onDownloadStart,",
-    "final void Function(",
-    "setDownloadListener(widget.onDownloadStart)",
+    "setOnDownloadStart(widget.onDownloadStart!)",
 ):
     if required not in w:
         raise SystemExit("adblocker patch incomplete: " + required)
 
 widget.write_text(w)
-print("Patched app source:", MAIN)
-print("Patched Android controller:", android_controller)
-print("Patched adblocker widget:", widget)
+print("supported listener patcher ready")
