@@ -86,7 +86,7 @@ jobs:
           grep -q "nexus-nexus-ba.github.io" lib/main.dart
           grep -q "inthedungeons123.lol" lib/main.dart
           grep -q "'referer': referer" lib/main.dart
-          grep -q "'userAgent': _browserUserAgent" lib/main.dart
+          grep -q "'userAgent': userAgent ?? _browserUserAgent" lib/main.dart
           grep -q 'native_downloads' lib/main.dart
           grep -q 'onDownloadStart:' lib/main.dart
           grep -q "class BrowserApp" lib/main.dart
