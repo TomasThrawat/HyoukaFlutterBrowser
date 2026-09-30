@@ -6,7 +6,10 @@ source = MAIN.read_text()
 domains = (
     "  'readilyprobablechow.shop',",
     "  'nexus-nexus-ba.github.io',",
-    "  'inthedungeons123.lol',",
+    "  'inthedungeons123.lol',"
+    "  'werefilledwit.org',"
+    "  'hemihydro.com',"
+    "  'melbetegypt.com',",
 )
 anchor = "  'click.a-ads.com',"
 if anchor not in source:
