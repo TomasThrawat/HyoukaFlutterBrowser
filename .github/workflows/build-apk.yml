@@ -12,21 +12,21 @@ jobs:
     env:
       GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.vfs.watch=false
     steps:
-      - name: Configure Git defaults
-        run: |
-          set -euo pipefail
-          printf '[init]\\n\\tdefaultBranch = main\\n' > "$RUNNER_TEMP/hyouka-gitconfig"
       - uses: actions/checkout@v7
-        env:
-          GIT_CONFIG_GLOBAL: \${{ runner.temp }}/hyouka-gitconfig
+
+      - name: Configure Git defaults
+        run: git config --global init.defaultBranch main
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
       - name: Generate Flutter Android wrapper
         run: |
           set -euo pipefail
@@ -37,36 +37,43 @@ jobs:
             --project-name hyouka_browser
           rm -rf android
           cp -a /tmp/hyouka-browser-platform/android ./android
+
       - name: Apply native Android download bridge
         run: |
           set -euo pipefail
           test -s android_native/MainActivity.kt
           mkdir -p android/app/src/main/kotlin/com/hyouka/browser
-          cp android_native/MainActivity.kt android/app/src/main/kotlin/com/hyouka/browser/MainActivity.kt
+          cp android_native/MainActivity.kt \
+            android/app/src/main/kotlin/com/hyouka/browser/MainActivity.kt
+
       - name: Configure Gradle for CI
         run: |
           set -euo pipefail
-          printf '\\norg.gradle.vfs.watch=false\\n' >> android/gradle.properties
+          printf '\norg.gradle.vfs.watch=false\n' >> android/gradle.properties
+
       - name: Configure Android manifest
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path("android/app/src/main/AndroidManifest.xml")
-          s=p.read_text()
-          permission='    <uses-permission android:name="android.permission.INTERNET" />'
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          permission = '    <uses-permission android:name="android.permission.INTERNET" />'
           if permission not in s:
-              marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-              s=s.replace(marker, marker+"\\n"+permission, 1)
-          s=s.replace('android:label="hyouka_browser"', 'android:label="Hyouka Browser"')
+              marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+              s = s.replace(marker, marker + "\n" + permission, 1)
+          s = s.replace('android:label="hyouka_browser"', 'android:label="Hyouka Browser"')
           p.write_text(s)
           PY
+
       - name: Verify hybrid Android bridge
         run: |
           set -euo pipefail
+          grep -q 'class MainActivity' android/app/src/main/kotlin/com/hyouka/browser/MainActivity.kt
           grep -q 'MethodChannel' android/app/src/main/kotlin/com/hyouka/browser/MainActivity.kt
           grep -q 'DownloadManager' android/app/src/main/kotlin/com/hyouka/browser/MainActivity.kt
           grep -q 'native_downloads' lib/main.dart
           ! grep -qE 'dio:|path_provider:' pubspec.yaml
+
       - name: Verify application source
         run: |
           set -euo pipefail
@@ -74,13 +81,16 @@ jobs:
           grep -q "class BrowserApp" lib/main.dart
           grep -q "adblocker_webview" pubspec.yaml
           grep -q "shared_preferences" pubspec.yaml
+
       - run: dart format lib test
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+
       - name: Build arm64-v8a only
         run: flutter build apk --release --split-per-abi --target-platform android-arm64
-      - name: Verify arm64-v8a only
+
+      - name: Verify release APK
         run: |
           set -euo pipefail
           APK=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
@@ -88,14 +98,26 @@ jobs:
           test "$(find build/app/outputs/flutter-apk -maxdepth 1 -name '*.apk' -type f | wc -l)" -eq 1
           test -z "$(unzip -Z1 "$APK" | grep -E '^lib/(armeabi-v7a|x86|x86_64|mips|mips64)/' || true)"
           test "$(unzip -Z1 "$APK" | grep -c '^lib/arm64-v8a/' || true)" -gt 0
-          test "$(unzip -Z1 "$APK" | grep -c 'com/hyouka/browser/MainActivity' || true)" -gt 0
+          test "$(unzip -Z1 "$APK" | grep -cE '^classes[0-9]*\.dex$' || true)" -gt 0
+
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$AAPT"
+          "$AAPT" dump badging "$APK" | grep -q "package: name='com.hyouka.browser'"
+          "$AAPT" dump badging "$APK" | grep -q "application-label:'Hyouka Browser'"
           sha256sum "$APK"
+
       - uses: actions/upload-artifact@v7
         with:
           name: hyouka-browser-arm64-v8a
           path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           if-no-files-found: error
+
       - name: GitHub release
         env:
           GH_TOKEN: \${{ github.token }}
-        run: gh release create "v1.4.0-build-\${{ github.run_number }}" build/app/outputs/flutter-apk/app-arm64-v8a-release.apk --title "Hyouka Browser v1.4.0-build-\${{ github.run_number }}" --notes "Flutter UI/state + small Android DownloadManager bridge; pure black UI; search; history; EasyList/AdGuard blocking; visible download progress; arm64-v8a only."
+        run: |
+          gh release create \
+            "v1.4.0-build-\${{ github.run_number }}" \
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            --title "Hyouka Browser v1.4.0-build-\${{ github.run_number }}" \
+            --notes "Flutter UI/state + small Android DownloadManager bridge; pure black UI; search; history; EasyList/AdGuard blocking; visible download progress; arm64-v8a only."
