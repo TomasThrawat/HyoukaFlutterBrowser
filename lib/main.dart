@@ -36,6 +36,15 @@ const _extraBlockedDomains = <String>[
   'rlcdn.com',
 ];
 
+Future<void> performSingleWebViewBack({
+  required Future<bool> Function() canGoBack,
+  required Future<void> Function() goBack,
+}) async {
+  if (await canGoBack()) {
+    await goBack();
+  }
+}
+
 Uri resolveBrowserInput(String value) {
   final input = value.trim();
   if (input.isEmpty) {
@@ -300,6 +309,7 @@ class _BrowserPageState extends State<BrowserPage> {
   final Set<String> _downloadUrls = <String>{};
   late final Future<void> _downloadsReady;
   bool _downloadPollInProgress = false;
+  bool _backStepInProgress = false;
   int progress = 0;
   bool _adBlockEnabled = true;
   bool _googleFallbackUsed = false;
@@ -445,7 +455,7 @@ class _BrowserPageState extends State<BrowserPage> {
                     (entry) => Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
                       child: Text(
-                        entry.key + '  •  ' + entry.value.toString(),
+                        entry.key + '  â¢  ' + entry.value.toString(),
                         style: const TextStyle(color: Colors.white54),
                       ),
                     ),
@@ -524,8 +534,8 @@ class _BrowserPageState extends State<BrowserPage> {
       final title = (await controller.getTitle() ?? '').toLowerCase();
       final challenge = title.contains('unusual traffic') ||
           title.contains('about this page') ||
-          title.contains('معلومات عن هذه الصفحة') ||
-          title.contains('حركة مرور غير معتادة');
+          title.contains('ÙØ¹ÙÙÙØ§Øª Ø¹Ù ÙØ°Ù Ø§ÙØµÙØ­Ø©') ||
+          title.contains('Ø­Ø±ÙØ© ÙØ±ÙØ± ØºÙØ± ÙØ¹ØªØ§Ø¯Ø©');
 
       if (challenge) {
         final query = _pendingGoogleSearch ?? url.queryParameters['q'];
@@ -535,7 +545,7 @@ class _BrowserPageState extends State<BrowserPage> {
           final fallback =
               'https://www.bing.com/search?q=' + Uri.encodeQueryComponent(query);
           await controller.loadUrl(fallback);
-          _showMessage('Google طلب تحقق للشبكة، تم تحويل البحث تلقائياً.');
+          _showMessage('Google Ø·ÙØ¨ ØªØ­ÙÙ ÙÙØ´Ø¨ÙØ©Ø ØªÙ ØªØ­ÙÙÙ Ø§ÙØ¨Ø­Ø« ØªÙÙØ§Ø¦ÙØ§Ù.');
           return;
         }
       }
@@ -555,6 +565,22 @@ class _BrowserPageState extends State<BrowserPage> {
 
   Future<void> _reload() async {
     await controller.reload();
+  }
+
+  Future<void> _goBackOneStep() async {
+    if (_backStepInProgress) {
+      return;
+    }
+
+    _backStepInProgress = true;
+    try {
+      await performSingleWebViewBack(
+        canGoBack: controller.canGoBack,
+        goBack: controller.goBack,
+      );
+    } finally {
+      _backStepInProgress = false;
+    }
   }
 
     Future<void> _trackDownloadUrl(Uri uri) async {
@@ -712,7 +738,7 @@ class _BrowserPageState extends State<BrowserPage> {
                 : _downloads.length.toString() +
                     ' total' +
                     (activeCount > 0
-                        ? ' • ' + activeCount.toString() + ' active'
+                        ? ' â¢ ' + activeCount.toString() + ' active'
                         : '');
 
             return SafeArea(
@@ -821,7 +847,7 @@ class _BrowserPageState extends State<BrowserPage> {
                                   final detail =
                                       isActive && item.totalBytes > 0
                                           ? item.status +
-                                              ' • ' +
+                                              ' â¢ ' +
                                               _formatDownloadBytes(
                                                 item.receivedBytes,
                                               ) +
@@ -1041,8 +1067,15 @@ class _BrowserPageState extends State<BrowserPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
+    return PopScope<void>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          unawaited(_goBackOneStep());
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
       body: SafeArea(
         child: Column(
           children: [
@@ -1208,6 +1241,7 @@ class _BrowserPageState extends State<BrowserPage> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

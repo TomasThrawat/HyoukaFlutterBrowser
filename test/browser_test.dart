@@ -2,6 +2,32 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:browser/main.dart';
 
 void main() {
+  test('single webview back navigates exactly once when history exists', () async {
+    var goBackCalls = 0;
+
+    await performSingleWebViewBack(
+      canGoBack: () async => true,
+      goBack: () async {
+        goBackCalls++;
+      },
+    );
+
+    expect(goBackCalls, 1);
+  });
+
+  test('single webview back does nothing when history is unavailable', () async {
+    var goBackCalls = 0;
+
+    await performSingleWebViewBack(
+      canGoBack: () async => false,
+      goBack: () async {
+        goBackCalls++;
+      },
+    );
+
+    expect(goBackCalls, 0);
+  });
+
   test('plain text is converted to a Google search', () {
     expect(
       resolveBrowserInput('flutter ad blocker').toString(),
