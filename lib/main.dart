@@ -132,7 +132,7 @@ class BrowserApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Hyouka Browser',
+      title: 'Browser',
       theme: ThemeData(
         brightness: Brightness.dark,
         useMaterial3: true,
@@ -730,9 +730,9 @@ class _BrowserPageState extends State<BrowserPage> {
                   shouldBlockAds: _adBlockEnabled,
                   adBlockerWebviewController: controller,
                   userAgent:
-                      'Mozilla/5.0 (Linux; Android 12; CPH2095) '
+                      'Mozilla/5.0 (X11; Linux x86_64) '
                       'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/140.0.0.0 Mobile Safari/537.36',
+                      'Chrome/140.0.0.0 Safari/537.36',
                   onLoadStart: (url) {
                     if (!mounted) {
                       return;
