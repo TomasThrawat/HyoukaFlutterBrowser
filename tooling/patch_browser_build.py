@@ -90,7 +90,22 @@ if "Future<void> setDownloadListener(" not in controller_source:
     }
 
     final listener = android_webview.DownloadListener(
-      onDownloadStart: onDownloadStart,
+      onDownloadStart: (
+        android_webview.DownloadListener _,
+        String url,
+        String userAgent,
+        String contentDisposition,
+        String mimetype,
+        int contentLength,
+      ) {
+        onDownloadStart(
+          url,
+          userAgent,
+          contentDisposition,
+          mimetype,
+          contentLength,
+        );
+      },
     );
     await _webView.setDownloadListener(listener);
   }
