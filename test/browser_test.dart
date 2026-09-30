@@ -26,10 +26,10 @@ void main() {
   test('history moves the newest visit to the front and removes duplicates', () {
     expect(
       addHistoryEntry(
-        const <String>['https://example.com', 'https://google.com'],
-        'https://example.com',
+        const <String>['https://google.com', 'https://example.com'],
+        'https://google.com',
       ),
-      const <String>['https://example.com', 'https://google.com'],
+      const <String>['https://google.com', 'https://example.com'],
     );
   });
 
@@ -43,7 +43,7 @@ void main() {
     );
   });
 
-  test('download file name uses the final URL segment', () {
+  test('download file names are sanitized', () {
     expect(
       downloadFileName(Uri.parse('https://example.com/files/test.pdf')),
       'test.pdf',

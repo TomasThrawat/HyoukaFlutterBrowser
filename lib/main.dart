@@ -1,6 +1,10 @@
+import 'dart:io';
+import 'dart:math';
+
 import 'package:adblocker_webview/adblocker_webview.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_file_downloader/flutter_file_downloader.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const homeUrl = 'https://www.google.com/';
@@ -51,14 +55,28 @@ List<String> addHistoryEntry(
 }
 
 String downloadFileName(Uri uri) {
-  if (uri.pathSegments.isNotEmpty) {
-    final last = uri.pathSegments.last.trim();
-    if (last.isNotEmpty && last != '/') {
-      return last;
-    }
-  }
+  final segment = uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.trim();
+  final raw = segment.isEmpty ? 'page.html' : segment;
+  final sanitized = raw.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_').trim();
+  return sanitized.isEmpty
+      ? 'hyouka_download_${DateTime.now().millisecondsSinceEpoch}.bin'
+      : sanitized;
+}
 
-  return 'hyouka_download_${DateTime.now().millisecondsSinceEpoch}.html';
+class DownloadItem {
+  DownloadItem({
+    required this.id,
+    required this.url,
+    required this.fileName,
+  });
+
+  final String id;
+  final String url;
+  String fileName;
+  double progress = 0;
+  String status = 'Queued';
+  String? path;
+  String? error;
 }
 
 Future<void> main() async {
@@ -109,21 +127,6 @@ class BrowserApp extends StatelessWidget {
   }
 }
 
-class _DownloadEntry {
-  _DownloadEntry({
-    required this.id,
-    required this.url,
-    required this.fileName,
-  });
-
-  final String id;
-  final String url;
-  String fileName;
-  double progress = 0;
-  String status = 'Queued';
-  String? error;
-}
-
 class BrowserPage extends StatefulWidget {
   const BrowserPage({super.key});
 
@@ -136,9 +139,10 @@ class _BrowserPageState extends State<BrowserPage> {
   final address = TextEditingController(text: homeUrl);
   final focus = FocusNode();
   final prefs = SharedPreferencesAsync();
+  final dio = Dio();
 
   final List<String> _history = <String>[];
-  final List<_DownloadEntry> _downloads = <_DownloadEntry>[];
+  final List<DownloadItem> _downloads = <DownloadItem>[];
 
   int progress = 0;
   bool canBack = false;
@@ -153,7 +157,6 @@ class _BrowserPageState extends State<BrowserPage> {
 
   Future<void> _loadHistory() async {
     final saved = await prefs.getStringList(_historyKey);
-
     if (!mounted || saved == null) {
       return;
     }
@@ -167,7 +170,6 @@ class _BrowserPageState extends State<BrowserPage> {
 
   Future<void> _recordHistory(String url) async {
     final updated = addHistoryEntry(_history, url);
-
     if (!mounted) {
       return;
     }
@@ -236,6 +238,22 @@ class _BrowserPageState extends State<BrowserPage> {
     await _syncNavigation();
   }
 
+  Future<Directory> _downloadDirectory() async {
+    final downloads = await getDownloadsDirectory();
+    if (downloads != null) {
+      await downloads.create(recursive: true);
+      return downloads;
+    }
+
+    final documents = await getApplicationDocumentsDirectory();
+    await documents.create(recursive: true);
+    final fallback = Directory(
+      '${documents.path}${Platform.pathSeparator}Downloads',
+    );
+    await fallback.create(recursive: true);
+    return fallback;
+  }
+
   Future<void> _downloadCurrentPage() async {
     final input = address.text.trim();
     final uri = Uri.tryParse(input);
@@ -246,52 +264,75 @@ class _BrowserPageState extends State<BrowserPage> {
     }
 
     final id = DateTime.now().microsecondsSinceEpoch.toString();
-    final entry = _DownloadEntry(
-      id: id,
-      url: input,
-      fileName: downloadFileName(uri),
-    );
+    var fileName = downloadFileName(uri);
+    final directory = await _downloadDirectory();
+    var path = '${directory.path}${Platform.pathSeparator}$fileName';
+
+    if (await File(path).exists()) {
+      final suffix = Random().nextInt(999999);
+      final dot = fileName.lastIndexOf('.');
+      fileName = dot > 0
+          ? '${fileName.substring(0, dot)}_$suffix${fileName.substring(dot)}'
+          : '${fileName}_$suffix';
+      path = '${directory.path}${Platform.pathSeparator}$fileName';
+    }
+
+    final item = DownloadItem(id: id, url: input, fileName: fileName);
+
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
-      _downloads.insert(0, entry);
+      _downloads.insert(0, item);
     });
 
-    await FileDownloader.downloadFile(
-      url: input,
-      name: entry.fileName,
-      onProgress: (fileName, value) {
-        if (!mounted) {
-          return;
-        }
+    try {
+      item.status = 'Downloading';
+      await dio.download(
+        input,
+        path,
+        deleteOnError: true,
+        onReceiveProgress: (received, total) {
+          if (!mounted) {
+            return;
+          }
 
-        setState(() {
-          entry.fileName = fileName ?? entry.fileName;
-          entry.progress = value.clamp(0, 100).toDouble();
-          entry.status = entry.progress >= 100 ? 'Finishing' : 'Downloading';
-        });
-      },
-      onDownloadCompleted: (path) {
-        if (!mounted) {
-          return;
-        }
+          setState(() {
+            item.progress = total > 0 ? (received / total * 100).clamp(0, 100) : 0;
+            item.status = total > 0 ? 'Downloading' : 'Downloading';
+          });
+        },
+      );
 
-        setState(() {
-          entry.progress = 100;
-          entry.status = 'Completed';
-          entry.error = path;
-        });
-      },
-      onDownloadError: (error) {
-        if (!mounted) {
-          return;
-        }
+      if (!mounted) {
+        return;
+      }
 
-        setState(() {
-          entry.status = 'Failed';
-          entry.error = error;
-        });
-      },
-    );
+      setState(() {
+        item.progress = 100;
+        item.status = 'Completed';
+        item.path = path;
+      });
+    } on DioException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        item.status = 'Failed';
+        item.error = error.message ?? error.type.name;
+      });
+    } on FileSystemException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        item.status = 'Failed';
+        item.error = error.message;
+      });
+    }
   }
 
   void _showMessage(String message) {
@@ -416,7 +457,9 @@ class _BrowserPageState extends State<BrowserPage> {
                                       width: 34,
                                       height: 34,
                                       child: CircularProgressIndicator(
-                                        value: item.progress / 100,
+                                        value: item.progress > 0
+                                            ? item.progress / 100
+                                            : null,
                                         strokeWidth: 3,
                                       ),
                                     )
@@ -449,7 +492,9 @@ class _BrowserPageState extends State<BrowserPage> {
                                     Padding(
                                       padding: const EdgeInsets.only(top: 6),
                                       child: LinearProgressIndicator(
-                                        value: item.progress / 100,
+                                        value: item.progress > 0
+                                            ? item.progress / 100
+                                            : null,
                                         minHeight: 3,
                                         backgroundColor: Colors.white12,
                                       ),
@@ -469,9 +514,9 @@ class _BrowserPageState extends State<BrowserPage> {
   }
 
   Widget _downloadButton() {
-    _DownloadEntry? active;
+    DownloadItem? active;
     for (final item in _downloads) {
-      if (item.status == 'Downloading' || item.status == 'Finishing') {
+      if (item.status == 'Downloading') {
         active = item;
         break;
       }
@@ -497,7 +542,7 @@ class _BrowserPageState extends State<BrowserPage> {
           alignment: Alignment.center,
           children: [
             CircularProgressIndicator(
-              value: active.progress / 100,
+              value: active.progress > 0 ? active.progress / 100 : null,
               strokeWidth: 2.5,
             ),
             Text(
@@ -518,6 +563,7 @@ class _BrowserPageState extends State<BrowserPage> {
   void dispose() {
     address.dispose();
     focus.dispose();
+    dio.close();
     super.dispose();
   }
 
