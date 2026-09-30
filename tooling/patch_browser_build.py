@@ -1,17 +1,17 @@
 from pathlib import Path
 
-path = Path("lib/main.dart")
-source = path.read_text()
+MAIN = Path("lib/main.dart")
+source = MAIN.read_text()
 
-anchor = "  'click.a-ads.com',"
-required_domains = (
+domains = (
     "  'readilyprobablechow.shop',",
     "  'nexus-nexus-ba.github.io',",
     "  'inthedungeons123.lol',",
 )
+anchor = "  'click.a-ads.com',"
 if anchor not in source:
     raise SystemExit("Adblock denylist anchor not found")
-for domain in required_domains:
+for domain in domains:
     if domain not in source:
         source = source.replace(anchor, anchor + "\n" + domain, 1)
 
@@ -31,75 +31,93 @@ if "_browserUserAgent" not in source:
 if "String? _lastPageUrl;" not in source:
     source = source.replace(
         "  bool _adBlockEnabled = true;",
-        "  String? _lastPageUrl;\n  bool _adBlockEnabled = true;",
+        "  bool _adBlockEnabled = true;\n  String? _lastPageUrl;",
         1,
     )
 
-if "final referer = _lastPageUrl;" not in source:
-    source = source.replace(
-        "    final fileName = downloadFileName(uri);",
-        "    final fileName = downloadFileName(uri);\n"
-        "    final referer = _lastPageUrl;",
-        1,
-    )
-
-old_map = """        <String, dynamic>{
-          'url': key,
-          'fileName': fileName,
-        },"""
-new_map = """        <String, dynamic>{
-          'url': key,
-          'fileName': fileName,
-          'referer': referer,
-          'userAgent': _browserUserAgent,
-        },"""
-if old_map in source:
-    source = source.replace(old_map, new_map, 1)
-
-if "_lastPageUrl = url.toString();" not in source:
-    source = source.replace(
-        "    _recordHistory(url.toString());",
-        "    _lastPageUrl = url.toString();\n"
-        "    _recordHistory(url.toString());",
-        1,
-    )
-
-old_url_block = """                    final parsedUrl = url == null ? null : Uri.tryParse(url);
-                    if (parsedUrl != null) {
-                      unawaited(_trackDownloadUrl(parsedUrl));
-                    }"""
-new_url_block = """                    final parsedUrl = url == null ? null : Uri.tryParse(url);
-                    if (parsedUrl != null) {
-                      if (!isLikelyDownloadUrl(parsedUrl)) {
-                        _lastPageUrl = parsedUrl.toString();
-                      }
-                      unawaited(_trackDownloadUrl(parsedUrl));
-                    }"""
-if old_url_block in source:
-    source = source.replace(old_url_block, new_url_block, 1)
-
-old_widget_ua = """                   userAgent:
-                       'Mozilla/5.0 (Linux; Android 12; CPH2095) '
-                       'AppleWebKit/537.36 (KHTML, like Gecko) '
-                       'Chrome/140.0.0.0 Mobile Safari/537.36',"""
-if old_widget_ua in source:
-    source = source.replace(
-        old_widget_ua,
-        "                   userAgent: _browserUserAgent,",
-        1,
-    )
-
-checks = (
-    "readilyprobablechow.shop",
-    "nexus-nexus-ba.github.io",
-    "inthedungeons123.lol",
+required_main = (
+    "onDownloadStart:",
+    "contentDispositionFileName(",
+    "downloadFileNameFromMetadata(",
+    "friendlyDownloadError(",
     "'referer': referer",
-    "'userAgent': _browserUserAgent",
-    "String? _lastPageUrl;",
+    "'userAgent': userAgent ?? _browserUserAgent",
+    "'mimeType': mimeType",
 )
-missing = [item for item in checks if item not in source]
-if missing:
-    raise SystemExit("Browser hardening patch incomplete: " + ", ".join(missing))
+missing_main = [item for item in required_main if item not in source]
+if missing_main:
+    raise SystemExit(
+        "Browser download implementation incomplete: " + ", ".join(missing_main)
+    )
 
-path.write_text(source)
-print("Patched", path, "with", len(source), "bytes")
+MAIN.write_text(source)
+
+pubcache = Path.home() / ".pub-cache" / "hosted" / "pub.dev"
+candidates = sorted(pubcache.glob("adblocker_webview-2.3.0"))
+if len(candidates) != 1:
+    raise SystemExit(
+        "Expected exactly one adblocker_webview-2.3.0 package, found "
+        + str(len(candidates))
+    )
+
+widget = candidates[0] / "lib" / "src" / "adblocker_webview.dart"
+if not widget.is_file():
+    raise SystemExit("adblocker_webview 2.3.0 widget source not found: " + str(widget))
+
+w = widget.read_text()
+
+if "this.onDownloadStart," not in w:
+    constructor_anchor = "    this.onUrlChanged,\n"
+    if constructor_anchor not in w:
+        raise SystemExit("DownloadListener constructor anchor not found")
+    w = w.replace(
+        constructor_anchor,
+        "    this.onUrlChanged,\n    this.onDownloadStart,\n",
+        1,
+    )
+
+if "final DownloadListener? onDownloadStart;" not in w:
+    field_anchor = "  final void Function(String? url)? onUrlChanged;\n"
+    if field_anchor not in w:
+        raise SystemExit("DownloadListener field anchor not found")
+    w = w.replace(
+        field_anchor,
+        field_anchor
+        + "\n"
+        + "  /// Invoked when Android WebView reports a download request.\n"
+        + "  final DownloadListener? onDownloadStart;\n",
+        1,
+    )
+
+listener_block = """    if (_webViewController.platform is AndroidWebViewController &&
+        widget.onDownloadStart != null) {
+      await (_webViewController.platform as AndroidWebViewController)
+          .setDownloadListener(widget.onDownloadStart);
+    }
+
+"""
+if "setDownloadListener(widget.onDownloadStart)" not in w:
+    platform_anchor = """    if (_webViewController.platform is AndroidWebViewController) {
+      unawaited(AndroidWebViewController.enableDebugging(kDebugMode));
+      unawaited(
+        (_webViewController.platform as AndroidWebViewController)
+            .setMediaPlaybackRequiresUserGesture(true),
+      );
+    }
+
+"""
+    if platform_anchor not in w:
+        raise SystemExit("Android WebView initialization anchor not found")
+    w = w.replace(platform_anchor, platform_anchor + listener_block, 1)
+
+for required in (
+    "this.onDownloadStart,",
+    "final DownloadListener? onDownloadStart;",
+    "setDownloadListener(widget.onDownloadStart)",
+):
+    if required not in w:
+        raise SystemExit("Package patch incomplete: " + required)
+
+widget.write_text(w)
+print("Patched app source:", MAIN)
+print("Patched dependency:", widget)

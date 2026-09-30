@@ -54,11 +54,6 @@ jobs:
           test -s "$NATIVE_DIR/MainActivity.kt"
           rm "$NATIVE_DIR/MainActivity.kt"
           cp android_native/MainActivity.kt "$NATIVE_DIR/MainActivity.kt"
-      - name: Apply browser hardening patch
-        run: |
-          set -euo pipefail
-          test -s tooling/patch_browser_build.py
-          python3 tooling/patch_browser_build.py
       - name: Configure Gradle
         run: printf '\norg.gradle.vfs.watch=false\n' >> android/gradle.properties
       - name: Configure Android manifest
@@ -93,6 +88,7 @@ jobs:
           grep -q "'referer': referer" lib/main.dart
           grep -q "'userAgent': _browserUserAgent" lib/main.dart
           grep -q 'native_downloads' lib/main.dart
+          grep -q 'onDownloadStart:' lib/main.dart
           grep -q "class BrowserApp" lib/main.dart
           grep -q "title: 'Browser'" lib/main.dart
           grep -q "Mozilla/5.0 (Linux; Android 12; CPH2095)" lib/main.dart
@@ -102,6 +98,23 @@ jobs:
           test "$(find android/app/src/main/kotlin -name 'MainActivity.kt' -type f | wc -l)" -eq 1
       - run: dart format lib test
       - run: flutter pub get
+      - name: Apply browser hardening patch
+        run: |
+          set -euo pipefail
+          test -s tooling/patch_browser_build.py
+          python3 tooling/patch_browser_build.py
+      - name: Verify download listener patch
+        run: |
+          set -euo pipefail
+          PACKAGE_DIR="$HOME/.pub-cache/hosted/pub.dev/adblocker_webview-2.3.0"
+          test -f "$PACKAGE_DIR/lib/src/adblocker_webview.dart"
+          grep -q "this.onDownloadStart" "$PACKAGE_DIR/lib/src/adblocker_webview.dart"
+          grep -q "final DownloadListener? onDownloadStart" "$PACKAGE_DIR/lib/src/adblocker_webview.dart"
+          grep -q "setDownloadListener(widget.onDownloadStart)" "$PACKAGE_DIR/lib/src/adblocker_webview.dart"
+          grep -q "onDownloadStart:" lib/main.dart
+          grep -q "contentDispositionFileName(" lib/main.dart
+          grep -q "downloadFileNameFromMetadata(" lib/main.dart
+          grep -q "friendlyDownloadError(" lib/main.dart
       - run: flutter analyze
       - run: flutter test
       - name: Build arm64-v8a only

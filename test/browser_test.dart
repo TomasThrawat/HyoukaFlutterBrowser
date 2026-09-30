@@ -121,4 +121,37 @@ void main() {
       'archive.zip',
     );
   });
+  test('Content-Disposition filename is preferred and sanitized', () {
+    expect(
+      contentDispositionFileName('attachment; filename="My Browser.apk"'),
+      'My Browser.apk',
+    );
+  });
+
+  test('extended Content-Disposition filename is decoded', () {
+    expect(
+      contentDispositionFileName(
+        "attachment; filename*=UTF-8''Browser%20Build.apk",
+      ),
+      'Browser Build.apk',
+    );
+  });
+
+  test('extensionless APK downloads get an APK filename from MIME type', () {
+    expect(
+      downloadFileNameFromMetadata(
+        Uri.parse('https://example.com/download?id=42'),
+        mimeType: 'application/vnd.android.package-archive',
+      ),
+      'download.apk',
+    );
+  });
+
+  test('403 errors are shown as access denied', () {
+    expect(
+      friendlyDownloadError('DownloadManager reason code: 403'),
+      'Access denied (403). The server rejected this download request.',
+    );
+  });
+
 }

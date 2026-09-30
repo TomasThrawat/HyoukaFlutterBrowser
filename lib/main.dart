@@ -15,6 +15,9 @@ const _adBlockKey = 'ad_block_enabled';
 
 const _extraBlockedDomains = <String>[
   'click.a-ads.com',
+  'inthedungeons123.lol',
+  'nexus-nexus-ba.github.io',
+  'readilyprobablechow.shop',
   'doubleclick.net',
   'googlesyndication.com',
   'googleadservices.com',
@@ -179,6 +182,102 @@ bool isLikelyDownloadUrl(Uri uri) {
   return downloadableExtensions.contains(extension) || hasDownloadQuery;
 }
 
+
+String? contentDispositionFileName(String value) {
+  final input = value.trim();
+  if (input.isEmpty) {
+    return null;
+  }
+
+  final extended = RegExp(
+    r"filename\*\s*=\s*(?:UTF-8''|utf-8'')([^;]+)",
+    caseSensitive: false,
+  ).firstMatch(input);
+  final basic = RegExp(
+    r'filename\s*=\s*"([^"]+)"',
+    caseSensitive: false,
+  ).firstMatch(input);
+  final unquoted = basic == null
+      ? RegExp(r'filename\s*=\s*([^;]+)', caseSensitive: false).firstMatch(input)
+      : null;
+
+  final raw = extended?.group(1) ?? basic?.group(1) ?? unquoted?.group(1);
+  if (raw == null) {
+    return null;
+  }
+
+  var decoded = raw.trim();
+  if (decoded.startsWith('"') && decoded.endsWith('"')) {
+    decoded = decoded.substring(1, decoded.length - 1);
+  }
+  try {
+    decoded = Uri.decodeComponent(decoded);
+  } catch (_) {}
+
+  final sanitized = decoded
+      .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  final normalized = _normalizeDownloadFileName(sanitized);
+  return normalized.isEmpty ? null : normalized;
+}
+
+String downloadFileNameFromMetadata(
+  Uri uri, {
+  String? contentDisposition,
+  String? mimeType,
+}) {
+  final fromHeader = contentDisposition == null
+      ? null
+      : contentDispositionFileName(contentDisposition);
+  if (fromHeader != null) {
+    return fromHeader;
+  }
+
+  final fromUrl = downloadFileName(uri);
+  if (!fromUrl.endsWith('.html') && !fromUrl.endsWith('.htm')) {
+    return fromUrl;
+  }
+
+  const mimeExtensions = <String, String>{
+    'application/vnd.android.package-archive': '.apk',
+    'application/pdf': '.pdf',
+    'application/zip': '.zip',
+    'application/x-7z-compressed': '.7z',
+    'application/x-rar-compressed': '.rar',
+    'text/plain': '.txt',
+    'text/csv': '.csv',
+    'audio/mpeg': '.mp3',
+    'audio/wav': '.wav',
+    'audio/x-wav': '.wav',
+    'audio/mp4': '.m4a',
+    'video/mp4': '.mp4',
+    'video/x-matroska': '.mkv',
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+  };
+  final extension = mimeExtensions[mimeType?.toLowerCase().trim()];
+  final base = _normalizeDownloadFileName(
+    uri.pathSegments.isEmpty ? '' : uri.pathSegments.last,
+  );
+  if (extension != null && base.isNotEmpty && !base.endsWith('.html')) {
+    return base + extension;
+  }
+
+  final stamp = DateTime.now().millisecondsSinceEpoch;
+  return 'hyouka_download_' + stamp.toString() + (extension ?? '.bin');
+}
+
+String friendlyDownloadError(String? reason) {
+  final value = reason?.trim() ?? '';
+  if (RegExp(r'\b403\b').hasMatch(value)) {
+    return 'Access denied (403). The server rejected this download request.';
+  }
+  return value.isEmpty ? 'Download failed.' : value;
+}
+
 String downloadFileName(Uri uri) {
   final segment =
       uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.trim();
@@ -312,6 +411,7 @@ class _BrowserPageState extends State<BrowserPage> {
   bool _backStepInProgress = false;
   int progress = 0;
   bool _adBlockEnabled = true;
+  String? _lastPageUrl;
   bool _googleFallbackUsed = false;
   String? _pendingGoogleSearch;
   int _blockedResourceCount = 0;
@@ -359,7 +459,9 @@ class _BrowserPageState extends State<BrowserPage> {
           continue;
         }
         restored.add(item);
-        _downloadUrls.add(item.url);
+        if (item.status == 'Queued' || item.status == 'Downloading') {
+          _downloadUrls.add(item.url);
+        }
       }
 
       if (!mounted || restored.isEmpty) {
@@ -560,6 +662,7 @@ class _BrowserPageState extends State<BrowserPage> {
       address.text = url.toString();
       _blockedResourceCount = controller.statistics.blockedResourceCount;
     });
+    _lastPageUrl = url.toString();
     _recordHistory(url.toString());
   }
 
@@ -583,35 +686,92 @@ class _BrowserPageState extends State<BrowserPage> {
     }
   }
 
-    Future<void> _trackDownloadUrl(Uri uri) async {
+  Future<void> _handleWebViewDownload(
+    String url,
+    String userAgent,
+    String contentDisposition,
+    String mimetype,
+    int contentLength,
+  ) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) {
+      return;
+    }
+
+    await _trackDownloadUrl(
+      uri,
+      fileName: downloadFileNameFromMetadata(
+        uri,
+        contentDisposition: contentDisposition,
+        mimeType: mimetype,
+      ),
+      referer: _lastPageUrl,
+      userAgent: userAgent,
+      mimeType: mimetype,
+      contentLength: contentLength,
+    );
+  }
+
+  Future<void> _trackDownloadUrl(
+    Uri uri, {
+    String? fileName,
+    String? referer,
+    String? userAgent,
+    String? mimeType,
+    int? contentLength,
+  }) async {
     await _downloadsReady;
-    if (!mounted || !isLikelyDownloadUrl(uri)) {
+    if (!mounted) {
       return;
     }
 
     final key = uri.toString();
+    final shouldTrackUrl = isLikelyDownloadUrl(uri) || fileName != null;
+    if (!shouldTrackUrl) {
+      return;
+    }
+
+    final hasActiveDuplicate = _downloads.any(
+      (item) =>
+          item.url == key &&
+          (item.status == 'Queued' || item.status == 'Downloading'),
+    );
+    if (hasActiveDuplicate) {
+      return;
+    }
+
+    _downloadUrls.remove(key);
     if (!_downloadUrls.add(key)) {
       return;
     }
 
-    final fileName = downloadFileName(uri);
+    final effectiveFileName = fileName ??
+        downloadFileNameFromMetadata(
+          uri,
+          mimeType: mimeType,
+        );
 
     try {
       final nativeId = await _downloadChannel.invokeMethod<int>(
         'startDownload',
         <String, dynamic>{
           'url': key,
-          'fileName': fileName,
+          'fileName': effectiveFileName,
+          'referer': referer,
+          'userAgent': userAgent ?? _browserUserAgent,
+          'mimeType': mimeType,
+          'contentLength': contentLength,
         },
       );
 
       if (!mounted || nativeId == null) {
+        _downloadUrls.remove(key);
         return;
       }
 
       final item = DownloadItem(
         url: key,
-        fileName: fileName,
+        fileName: effectiveFileName,
         nativeId: nativeId,
       );
 
@@ -623,9 +783,7 @@ class _BrowserPageState extends State<BrowserPage> {
       _ensureDownloadPolling();
     } on PlatformException catch (error) {
       _downloadUrls.remove(key);
-      _showMessage(
-        'Download could not start: ' + (error.message ?? 'unknown error'),
-      );
+      _showMessage(friendlyDownloadError(error.message));
     }
   }
 
@@ -677,13 +835,22 @@ class _BrowserPageState extends State<BrowserPage> {
             ? (received / total * 100).clamp(0, 100).toDouble()
             : item.progress;
 
+        final previousStatus = item.status;
         setState(() {
           item.status = nextStatus;
           item.receivedBytes = received;
           item.totalBytes = total;
           item.progress = nextStatus == 'Completed' ? 100 : nextProgress;
-          item.error = data['reason']?.toString();
+          item.error = friendlyDownloadError(data['reason']?.toString());
         });
+        if (nextStatus == 'Completed' || nextStatus == 'Failed') {
+          _downloadUrls.remove(item.url);
+        }
+        if (nextStatus == 'Failed' &&
+            previousStatus != 'Failed' &&
+            mounted) {
+          _showMessage(item.error ?? 'Download failed.');
+        }
         _downloadRevision.value++;
         } on PlatformException catch (error) {
           if (!mounted) {
@@ -1100,6 +1267,7 @@ class _BrowserPageState extends State<BrowserPage> {
                     });
                   },
                   onLoadFinished: _handleLoadFinished,
+                  onDownloadStart: _handleWebViewDownload,
                   onUrlChanged: (url) {
                     if (!mounted) {
                       return;
@@ -1109,6 +1277,9 @@ class _BrowserPageState extends State<BrowserPage> {
                     });
                     final parsedUrl = url == null ? null : Uri.tryParse(url);
                     if (parsedUrl != null) {
+                      if (!isLikelyDownloadUrl(parsedUrl)) {
+                        _lastPageUrl = parsedUrl.toString();
+                      }
                       unawaited(_trackDownloadUrl(parsedUrl));
                     }
                   },

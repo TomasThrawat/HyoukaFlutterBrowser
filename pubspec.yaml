@@ -1,13 +1,13 @@
 name: browser
 description: A Flutter Android browser with search, history, downloads, progress, and stronger ad and tracker blocking.
 publish_to: "none"
-version: 1.5.0+7
+version: 1.6.0+8
 environment:
   sdk: ">=3.10.1 <4.0.0"
 dependencies:
   flutter:
     sdk: flutter
-  adblocker_webview: ^2.3.0
+  adblocker_webview: 2.3.0
   shared_preferences: ^2.5.5
 dev_dependencies:
   flutter_test:
