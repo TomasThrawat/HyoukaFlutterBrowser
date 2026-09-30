@@ -108,6 +108,25 @@ String _normalizeDownloadFileName(String value) {
   return result;
 }
 
+String _formatDownloadBytes(int bytes) {
+  if (bytes < 1024) {
+    return bytes.toString() + ' B';
+  }
+
+  final kb = bytes / 1024;
+  if (kb < 1024) {
+    return kb.toStringAsFixed(1) + ' KB';
+  }
+
+  final mb = kb / 1024;
+  if (mb < 1024) {
+    return mb.toStringAsFixed(1) + ' MB';
+  }
+
+  final gb = mb / 1024;
+  return gb.toStringAsFixed(1) + ' GB';
+}
+
 bool isLikelyDownloadUrl(Uri uri) {
     const downloadableExtensions = <String>{
       'apk',
@@ -251,6 +270,7 @@ class _BrowserPageState extends State<BrowserPage> {
   final List<DownloadItem> _downloads = <DownloadItem>[];
 
   Timer? _downloadPoller;
+  final ValueNotifier<int> _downloadRevision = ValueNotifier<int>(0);
   final Set<String> _downloadUrls = <String>{};
   int progress = 0;
   bool _adBlockEnabled = true;
@@ -479,6 +499,7 @@ class _BrowserPageState extends State<BrowserPage> {
       setState(() {
         _downloads.insert(0, item);
       });
+      _downloadRevision.value++;
       _ensureDownloadPolling();
     } on PlatformException catch (error) {
       _downloadUrls.remove(key);
@@ -537,6 +558,7 @@ class _BrowserPageState extends State<BrowserPage> {
           item.progress = nextStatus == 'Completed' ? 100 : nextProgress;
           item.error = data['reason']?.toString();
         });
+        _downloadRevision.value++;
       } on PlatformException catch (error) {
         if (!mounted) {
           return;
@@ -546,6 +568,7 @@ class _BrowserPageState extends State<BrowserPage> {
           item.status = 'Failed';
           item.error = error.message ?? 'Download status unavailable';
         });
+        _downloadRevision.value++;
       }
     }
   }
@@ -558,6 +581,199 @@ class _BrowserPageState extends State<BrowserPage> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showDownloads() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.black,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return ValueListenableBuilder<int>(
+          valueListenable: _downloadRevision,
+          builder: (context, _, __) {
+            final activeCount = _downloads
+                .where(
+                  (item) =>
+                      item.status == 'Queued' ||
+                      item.status == 'Downloading',
+                )
+                .length;
+            final height = MediaQuery.sizeOf(context).height * 0.75;
+            final summary = _downloads.isEmpty
+                ? 'No downloads'
+                : _downloads.length.toString() +
+                    ' total' +
+                    (activeCount > 0
+                        ? ' • ' + activeCount.toString() + ' active'
+                        : '');
+
+            return SafeArea(
+              child: SizedBox(
+                height: height.clamp(260.0, 600.0),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Downloads',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            summary,
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const Divider(height: 1, color: Colors.white12),
+                      const SizedBox(height: 4),
+                      Expanded(
+                        child: _downloads.isEmpty
+                            ? const Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.download_outlined,
+                                      color: Colors.white38,
+                                      size: 36,
+                                    ),
+                                    SizedBox(height: 10),
+                                    Text(
+                                      'No downloads yet.',
+                                      style: TextStyle(
+                                        color: Colors.white54,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : ListView.separated(
+                                itemCount: _downloads.length,
+                                separatorBuilder: (context, index) =>
+                                    const Divider(
+                                  height: 1,
+                                  color: Colors.white12,
+                                ),
+                                itemBuilder: (context, index) {
+                                  final item = _downloads[index];
+                                  final isActive =
+                                      item.status == 'Queued' ||
+                                      item.status == 'Downloading';
+                                  final percent = item.progress.round();
+
+                                  Widget leading;
+                                  if (isActive) {
+                                    leading = SizedBox(
+                                      width: 42,
+                                      height: 42,
+                                      child: Stack(
+                                        alignment: Alignment.center,
+                                        children: [
+                                          CircularProgressIndicator(
+                                            value: item.totalBytes > 0
+                                                ? item.progress / 100
+                                                : null,
+                                            strokeWidth: 2.5,
+                                          ),
+                                          Text(
+                                            percent.toString() + '%',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 8,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  } else {
+                                    leading = Icon(
+                                      item.status == 'Completed'
+                                          ? Icons.check_circle_outline_rounded
+                                          : item.status == 'Failed'
+                                              ? Icons.error_outline_rounded
+                                              : Icons.download_done_rounded,
+                                      color: Colors.white70,
+                                      size: 28,
+                                    );
+                                  }
+
+                                  final detail =
+                                      isActive && item.totalBytes > 0
+                                          ? item.status +
+                                              ' • ' +
+                                              _formatDownloadBytes(
+                                                item.receivedBytes,
+                                              ) +
+                                              ' / ' +
+                                              _formatDownloadBytes(
+                                                item.totalBytes,
+                                              )
+                                          : item.status == 'Failed' &&
+                                                  item.error != null
+                                              ? item.error!
+                                              : item.status;
+
+                                  return ListTile(
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 0,
+                                      vertical: 4,
+                                    ),
+                                    leading: leading,
+                                    title: Text(
+                                      item.fileName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    subtitle: Text(
+                                      detail,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    trailing: isActive
+                                        ? Text(
+                                            percent.toString() + '%',
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          )
+                                        : const SizedBox.shrink(),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _showHistory() {
@@ -640,61 +856,69 @@ class _BrowserPageState extends State<BrowserPage> {
       }
     }
 
-    if (active == null) {
-      return const SizedBox(
-        width: 40,
-        height: 40,
-        child: Center(
-          child: Icon(Icons.download_rounded),
-        ),
-      );
-    }
-
-    final percent = active.progress.round();
-
-    return SizedBox(
-      width: 82,
-      height: 40,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          SizedBox(
-            width: 34,
-            height: 34,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                CircularProgressIndicator(
-                  value:
-                      active.totalBytes > 0 ? active.progress / 100 : null,
-                  strokeWidth: 2.5,
-                ),
-                Text(
-                  '$percent%',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 8,
-                    fontWeight: FontWeight.w700,
+    return Semantics(
+      button: true,
+      label: 'Downloads',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: _showDownloads,
+          child: active == null
+              ? const SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Center(
+                    child: Icon(Icons.download_rounded),
+                  ),
+                )
+              : SizedBox(
+                  width: 82,
+                  height: 40,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      SizedBox(
+                        width: 34,
+                        height: 34,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CircularProgressIndicator(
+                              value: active.totalBytes > 0
+                                  ? active.progress / 100
+                                  : null,
+                              strokeWidth: 2.5,
+                            ),
+                            Text(
+                              active.progress.round().toString() + '%',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 8,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          active.fileName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              active.fileName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.end,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 8,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -702,6 +926,7 @@ class _BrowserPageState extends State<BrowserPage> {
   @override
   void dispose() {
     _downloadPoller?.cancel();
+    _downloadRevision.dispose();
     address.dispose();
     focus.dispose();
     super.dispose();
