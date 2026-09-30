@@ -368,7 +368,6 @@ class _BrowserPageState extends State<BrowserPage> {
 
   Future<void> _reload() async {
     await controller.reload();
-    await _syncNavigation();
   }
 
   Future<void> _downloadCurrentPage() async {
