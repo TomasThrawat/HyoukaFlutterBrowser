@@ -42,6 +42,20 @@ jobs:
           rm -rf android
           cp -a /tmp/hyouka-browser-platform/android ./android
 
+      - name: Apply pure-black launcher icon
+        run: |
+          set -euo pipefail
+          ICON=assets/pureblack_icon.png
+          test -s "$ICON"
+          RES=android/app/src/main/res
+          mkdir -p "$RES/drawable-nodpi" "$RES/mipmap-mdpi" "$RES/mipmap-hdpi" "$RES/mipmap-xhdpi" "$RES/mipmap-xxhdpi" "$RES/mipmap-xxxhdpi"
+          find "$RES" -type f \( -name 'ic_launcher*.png' -o -name 'ic_launcher*.webp' -o -name 'ic_launcher*.xml' \) -delete
+          cp "$ICON" "$RES/drawable-nodpi/pureblack_icon.png"
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            cp "$ICON" "$RES/mipmap-$density/ic_launcher.png"
+            cp "$ICON" "$RES/mipmap-$density/ic_launcher_round.png"
+          done
+
       - name: Apply native Android download bridge
         run: |
           set -euo pipefail
