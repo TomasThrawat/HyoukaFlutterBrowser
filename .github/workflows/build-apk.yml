@@ -3,14 +3,17 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.vfs.watch=false
+
     steps:
       - uses: actions/checkout@v7
 
@@ -41,10 +44,11 @@ jobs:
       - name: Apply native Android download bridge
         run: |
           set -euo pipefail
+          NATIVE_DIR=android/app/src/main/kotlin/com/hyouka/browser/hyouka_browser
           test -s android_native/MainActivity.kt
-          mkdir -p android/app/src/main/kotlin/com/hyouka/browser
-          cp android_native/MainActivity.kt \
-            android/app/src/main/kotlin/com/hyouka/browser/MainActivity.kt
+          test -s "$NATIVE_DIR/MainActivity.kt"
+          rm "$NATIVE_DIR/MainActivity.kt"
+          cp android_native/MainActivity.kt "$NATIVE_DIR/MainActivity.kt"
 
       - name: Configure Gradle for CI
         run: |
@@ -68,11 +72,15 @@ jobs:
       - name: Verify hybrid Android bridge
         run: |
           set -euo pipefail
-          grep -q 'class MainActivity' android/app/src/main/kotlin/com/hyouka/browser/MainActivity.kt
-          grep -q 'MethodChannel' android/app/src/main/kotlin/com/hyouka/browser/MainActivity.kt
-          grep -q 'DownloadManager' android/app/src/main/kotlin/com/hyouka/browser/MainActivity.kt
+          NATIVE=android/app/src/main/kotlin/com/hyouka/browser/hyouka_browser/MainActivity.kt
+          test -s "$NATIVE"
+          grep -q 'package com.hyouka.browser.hyouka_browser' "$NATIVE"
+          grep -q 'class MainActivity' "$NATIVE"
+          grep -q 'MethodChannel' "$NATIVE"
+          grep -q 'DownloadManager' "$NATIVE"
           grep -q 'native_downloads' lib/main.dart
           ! grep -qE 'dio:|path_provider:' pubspec.yaml
+          test "$(find android/app/src/main/kotlin -name 'MainActivity.kt' -type f | wc -l)" -eq 1
 
       - name: Verify application source
         run: |
@@ -102,7 +110,7 @@ jobs:
 
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           test -x "$AAPT"
-          "$AAPT" dump badging "$APK" | grep -q "package: name='com.hyouka.browser'"
+          "$AAPT" dump badging "$APK" | grep -q "package: name='com.hyouka.browser.hyouka_browser'"
           "$AAPT" dump badging "$APK" | grep -q "application-label:'Hyouka Browser'"
           sha256sum "$APK"
 

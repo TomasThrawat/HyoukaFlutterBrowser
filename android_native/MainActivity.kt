@@ -1,4 +1,4 @@
-package com.hyouka.browser
+package com.hyouka.browser.hyouka_browser
 
 import android.app.DownloadManager
 import android.content.Context
