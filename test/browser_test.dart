@@ -22,4 +22,31 @@ void main() {
       'https://example.com',
     );
   });
+
+  test('history moves the newest visit to the front and removes duplicates', () {
+    expect(
+      addHistoryEntry(
+        const <String>['https://example.com', 'https://google.com'],
+        'https://example.com',
+      ),
+      const <String>['https://example.com', 'https://google.com'],
+    );
+  });
+
+  test('history ignores non-web schemes', () {
+    expect(
+      addHistoryEntry(
+        const <String>['https://example.com'],
+        'mailto:test@example.com',
+      ),
+      const <String>['https://example.com'],
+    );
+  });
+
+  test('download file name uses the final URL segment', () {
+    expect(
+      downloadFileName(Uri.parse('https://example.com/files/test.pdf')),
+      'test.pdf',
+    );
+  });
 }

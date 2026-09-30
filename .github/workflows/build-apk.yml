@@ -40,20 +40,27 @@ jobs:
           set -euo pipefail
           test -s lib/main.dart
           grep -q "class BrowserApp" lib/main.dart
-          grep -q "webview_flutter" pubspec.yaml
-      - name: Add internet permission
+          grep -q "adblocker_webview" pubspec.yaml
+          grep -q "flutter_file_downloader" pubspec.yaml
+          grep -q "shared_preferences" pubspec.yaml
+      - name: Add internet and download permissions
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p=Path("android/app/src/main/AndroidManifest.xml")
           s=p.read_text()
-          permission='    <uses-permission android:name="android.permission.INTERNET" />'
-          if permission not in s:
-              marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-              s=s.replace(marker, marker+"\n"+permission, 1)
+          marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          permissions=[
+              '    <uses-permission android:name="android.permission.INTERNET" />',
+              '    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />',
+          ]
+          for permission in permissions:
+              if permission not in s:
+                  s=s.replace(marker, marker+"\n"+permission, 1)
           s=s.replace('android:label="hyouka_browser"', 'android:label="Hyouka Browser"')
           p.write_text(s)
           PY
+      - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
@@ -76,4 +83,4 @@ jobs:
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v1.0.0-build-${{ github.run_number }}" build/app/outputs/flutter-apk/app-arm64-v8a-release.apk --title "Hyouka Browser v1.0.0-build-${{ github.run_number }}" --notes "Flutter browser; arm64-v8a only."
+        run: gh release create "v1.2.0-build-${{ github.run_number }}" build/app/outputs/flutter-apk/app-arm64-v8a-release.apk --title "Hyouka Browser v1.2.0-build-${{ github.run_number }}" --notes "Flutter browser; pure black UI; search; history; downloads with progress; EasyList/AdGuard blocking; arm64-v8a only."
