@@ -236,9 +236,6 @@ String downloadFileNameFromMetadata(
   }
 
   final fromUrl = downloadFileName(uri);
-  if (!fromUrl.endsWith('.html') && !fromUrl.endsWith('.htm')) {
-    return fromUrl;
-  }
 
   const mimeExtensions = <String, String>{
     'application/vnd.android.package-archive': '.apk',
@@ -260,11 +257,18 @@ String downloadFileNameFromMetadata(
     'image/webp': '.webp',
   };
   final extension = mimeExtensions[mimeType?.toLowerCase().trim()];
-  final base = _normalizeDownloadFileName(
-    uri.pathSegments.isEmpty ? '' : uri.pathSegments.last,
-  );
-  if (extension != null && base.isNotEmpty && !base.endsWith('.html')) {
-    return base + extension;
+  if (extension != null) {
+    final lower = fromUrl.toLowerCase();
+    if (lower.endsWith(extension)) {
+      return fromUrl;
+    }
+    final knownDownloadExtension = RegExp(
+      r'\.(apk|zip|rar|7z|pdf|docx?|xlsx?|pptx?|csv|txt|mp3|wav|m4a|mp4|mkv|avi|mov|jpe?g|png|gif|webp)$',
+      caseSensitive: false,
+    ).hasMatch(lower);
+    if (!knownDownloadExtension) {
+      return fromUrl + extension;
+    }
   }
 
   final stamp = DateTime.now().millisecondsSinceEpoch;
