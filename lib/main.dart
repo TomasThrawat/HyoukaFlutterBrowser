@@ -149,7 +149,6 @@ class _BrowserPageState extends State<BrowserPage> {
     super.initState();
     controller.resetStatistics();
     _loadHistory();
-    FileDownloader().start();
   }
 
   Future<void> _loadHistory() async {

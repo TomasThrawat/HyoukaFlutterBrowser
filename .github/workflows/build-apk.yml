@@ -28,7 +28,10 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf /tmp/hyouka-browser-platform
-          flutter create /tmp/hyouka-browser-platform             --platforms=android             --org com.hyouka.browser             --project-name hyouka_browser
+          flutter create /tmp/hyouka-browser-platform \
+            --platforms=android \
+            --org com.hyouka.browser \
+            --project-name hyouka_browser
           rm -rf android
           cp -a /tmp/hyouka-browser-platform/android ./android
       - name: Configure Gradle for CI
@@ -60,7 +63,7 @@ jobs:
           s=s.replace('android:label="hyouka_browser"', 'android:label="Hyouka Browser"')
           p.write_text(s)
           PY
-      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: dart format lib test
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
