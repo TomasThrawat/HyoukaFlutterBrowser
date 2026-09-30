@@ -11,6 +11,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.util.Locale
 
 class MainActivity : FlutterActivity() {
     companion object {
@@ -40,7 +41,16 @@ class MainActivity : FlutterActivity() {
             result.error("INVALID_URL", "Download URL is empty.", null)
             return
         }
+
         val fileName = sanitizeFileName(call.argument<String>("fileName"))
+        val referer = call.argument<String>("referer")
+            ?.trim()
+            ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        val userAgent = call.argument<String>("userAgent")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: WebSettings.getDefaultUserAgent(this)
+
         try {
             val request = DownloadManager.Request(Uri.parse(url))
                 .setTitle(fileName)
@@ -54,14 +64,22 @@ class MainActivity : FlutterActivity() {
                     Environment.DIRECTORY_DOWNLOADS,
                     fileName,
                 )
+
             val cookie = CookieManager.getInstance().getCookie(url)
             if (!cookie.isNullOrBlank()) {
                 request.addRequestHeader("Cookie", cookie)
             }
+
+            request.addRequestHeader("User-Agent", userAgent)
+            request.addRequestHeader("Accept", "*/*")
             request.addRequestHeader(
-                "User-Agent",
-                WebSettings.getDefaultUserAgent(this),
+                "Accept-Language",
+                Locale.getDefault().toLanguageTag(),
             )
+            if (referer != null && referer != url) {
+                request.addRequestHeader("Referer", referer)
+            }
+
             result.success(downloadManager.enqueue(request))
         } catch (exception: Exception) {
             result.error(
@@ -92,6 +110,7 @@ class MainActivity : FlutterActivity() {
                 )
                 return
             }
+
             val status = cursor.getInt(
                 cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
             )
@@ -111,6 +130,7 @@ class MainActivity : FlutterActivity() {
             val localUri = cursor.getString(
                 cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI)
             )
+
             val statusText = when (status) {
                 DownloadManager.STATUS_PENDING -> "Queued"
                 DownloadManager.STATUS_RUNNING -> "Downloading"
@@ -118,6 +138,7 @@ class MainActivity : FlutterActivity() {
                 DownloadManager.STATUS_FAILED -> "Failed"
                 else -> "Unknown"
             }
+
             result.success(
                 hashMapOf(
                     "status" to statusText,
@@ -163,7 +184,7 @@ class MainActivity : FlutterActivity() {
         val input = value?.trim().orEmpty()
         val sanitized = input
             .replace(Regex("""[<>:"/\\|?*]"""), "_")
-            .replace(Regex("""\\s+"""), " ")
+            .replace(Regex("""\s+"""), " ")
             .trim()
             .take(180)
 
