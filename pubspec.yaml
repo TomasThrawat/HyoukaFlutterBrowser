@@ -1,15 +1,13 @@
 name: hyouka_browser
-description: A native Flutter Android browser with search, history, downloads, visible progress, and ad blocking.
+description: A Flutter Android browser with search, history, downloads, progress, and ad blocking.
 publish_to: "none"
-version: 1.3.0+4
+version: 1.4.0+5
 environment:
   sdk: ">=3.10.1 <4.0.0"
 dependencies:
   flutter:
     sdk: flutter
   adblocker_webview: ^2.3.0
-  dio: ^5.11.1
-  path_provider: ^2.1.6
   shared_preferences: ^2.5.5
 dev_dependencies:
   flutter_test:
