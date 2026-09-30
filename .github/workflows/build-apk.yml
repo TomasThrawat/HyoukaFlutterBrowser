@@ -5,8 +5,6 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
-env:
-  GIT_CONFIG_GLOBAL: ${{ runner.temp }}/hyouka-gitconfig
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,8 +12,10 @@ jobs:
       - name: Configure Git defaults
         run: |
           set -euo pipefail
-          printf '[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
+          printf '[init]\n\tdefaultBranch = main\n' > "$RUNNER_TEMP/hyouka-gitconfig"
       - uses: actions/checkout@v7
+        env:
+          GIT_CONFIG_GLOBAL: ${{ runner.temp }}/hyouka-gitconfig
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
