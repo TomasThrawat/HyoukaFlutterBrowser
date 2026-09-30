@@ -1,15 +1,14 @@
-import 'dart:io';
-import 'dart:math';
+import 'dart:async';
 
 import 'package:adblocker_webview/adblocker_webview.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const homeUrl = 'https://www.google.com/';
 const _historyKey = 'browser_history';
 const _maxHistoryItems = 100;
+const _downloadChannel = MethodChannel('hyouka.browser/native_downloads');
 
 Uri resolveBrowserInput(String value) {
   final input = value.trim();
@@ -29,7 +28,7 @@ Uri resolveBrowserInput(String value) {
   }
 
   return Uri.parse(
-    'https://www.google.com/search?q=${Uri.encodeComponent(input)}',
+    'https://www.google.com/search?q=' + Uri.encodeComponent(input),
   );
 }
 
@@ -55,28 +54,38 @@ List<String> addHistoryEntry(
 }
 
 String downloadFileName(Uri uri) {
-  final segment = uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.trim();
+  final segment =
+      uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.trim();
   final raw = segment.isEmpty ? 'page.html' : segment;
-  final sanitized = raw.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_').trim();
-  return sanitized.isEmpty
-      ? 'hyouka_download_${DateTime.now().millisecondsSinceEpoch}.bin'
-      : sanitized;
+  final sanitized = raw
+      .replaceAll(RegExp(r'[<>:"/\\\\|?*]'), '_')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  if (sanitized.isNotEmpty) {
+    return sanitized;
+  }
+
+  return 'hyouka_download_' +
+      DateTime.now().millisecondsSinceEpoch.toString() +
+      '.bin';
 }
 
 class DownloadItem {
   DownloadItem({
-    required this.id,
     required this.url,
     required this.fileName,
+    required this.nativeId,
   });
 
-  final String id;
   final String url;
-  String fileName;
+  final String fileName;
+  final int nativeId;
   double progress = 0;
   String status = 'Queued';
-  String? path;
   String? error;
+  int receivedBytes = 0;
+  int totalBytes = 0;
 }
 
 Future<void> main() async {
@@ -139,11 +148,11 @@ class _BrowserPageState extends State<BrowserPage> {
   final address = TextEditingController(text: homeUrl);
   final focus = FocusNode();
   final prefs = SharedPreferencesAsync();
-  final dio = Dio();
 
   final List<String> _history = <String>[];
   final List<DownloadItem> _downloads = <DownloadItem>[];
 
+  Timer? _downloadPoller;
   int progress = 0;
   bool canBack = false;
   bool canForward = false;
@@ -238,22 +247,6 @@ class _BrowserPageState extends State<BrowserPage> {
     await _syncNavigation();
   }
 
-  Future<Directory> _downloadDirectory() async {
-    final downloads = await getDownloadsDirectory();
-    if (downloads != null) {
-      await downloads.create(recursive: true);
-      return downloads;
-    }
-
-    final documents = await getApplicationDocumentsDirectory();
-    await documents.create(recursive: true);
-    final fallback = Directory(
-      '${documents.path}${Platform.pathSeparator}Downloads',
-    );
-    await fallback.create(recursive: true);
-    return fallback;
-  }
-
   Future<void> _downloadCurrentPage() async {
     final input = address.text.trim();
     final uri = Uri.tryParse(input);
@@ -263,75 +256,96 @@ class _BrowserPageState extends State<BrowserPage> {
       return;
     }
 
-    final id = DateTime.now().microsecondsSinceEpoch.toString();
-    var fileName = downloadFileName(uri);
-    final directory = await _downloadDirectory();
-    var path = '${directory.path}${Platform.pathSeparator}$fileName';
-
-    if (await File(path).exists()) {
-      final suffix = Random().nextInt(999999);
-      final dot = fileName.lastIndexOf('.');
-      fileName = dot > 0
-          ? '${fileName.substring(0, dot)}_$suffix${fileName.substring(dot)}'
-          : '${fileName}_$suffix';
-      path = '${directory.path}${Platform.pathSeparator}$fileName';
-    }
-
-    final item = DownloadItem(id: id, url: input, fileName: fileName);
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _downloads.insert(0, item);
-    });
-
     try {
-      item.status = 'Downloading';
-      await dio.download(
-        input,
-        path,
-        deleteOnError: true,
-        onReceiveProgress: (received, total) {
-          if (!mounted) {
-            return;
-          }
-
-          setState(() {
-            item.progress = total > 0 ? (received / total * 100).clamp(0, 100) : 0;
-            item.status = total > 0 ? 'Downloading' : 'Downloading';
-          });
+      final fileName = downloadFileName(uri);
+      final nativeId = await _downloadChannel.invokeMethod<int>(
+        'startDownload',
+        <String, dynamic>{
+          'url': input,
+          'fileName': fileName,
         },
       );
 
-      if (!mounted) {
+      if (!mounted || nativeId == null) {
         return;
       }
 
-      setState(() {
-        item.progress = 100;
-        item.status = 'Completed';
-        item.path = path;
-      });
-    } on DioException catch (error) {
-      if (!mounted) {
-        return;
-      }
+      final item = DownloadItem(
+        url: input,
+        fileName: fileName,
+        nativeId: nativeId,
+      );
 
       setState(() {
-        item.status = 'Failed';
-        item.error = error.message ?? error.type.name;
+        _downloads.insert(0, item);
       });
-    } on FileSystemException catch (error) {
-      if (!mounted) {
-        return;
-      }
+      _ensureDownloadPolling();
+    } on PlatformException catch (error) {
+      _showMessage(
+        'Download could not start: ' + (error.message ?? 'unknown error'),
+      );
+    }
+  }
 
-      setState(() {
-        item.status = 'Failed';
-        item.error = error.message;
-      });
+  void _ensureDownloadPolling() {
+    if (_downloadPoller != null) {
+      return;
+    }
+
+    _downloadPoller = Timer.periodic(
+      const Duration(milliseconds: 400),
+      (_) => _pollDownloads(),
+    );
+  }
+
+  Future<void> _pollDownloads() async {
+    final active = _downloads
+        .where(
+          (item) => item.status == 'Queued' || item.status == 'Downloading',
+        )
+        .toList();
+
+    if (active.isEmpty) {
+      _downloadPoller?.cancel();
+      _downloadPoller = null;
+      return;
+    }
+
+    for (final item in active) {
+      try {
+        final data = await _downloadChannel.invokeMapMethod<String, dynamic>(
+          'getDownloadStatus',
+          item.nativeId,
+        );
+
+        if (!mounted || data == null) {
+          continue;
+        }
+
+        final nextStatus = data['status']?.toString() ?? 'Downloading';
+        final received = (data['receivedBytes'] as num?)?.toInt() ?? 0;
+        final total = (data['totalBytes'] as num?)?.toInt() ?? 0;
+        final nextProgress = total > 0
+            ? (received / total * 100).clamp(0, 100).toDouble()
+            : item.progress;
+
+        setState(() {
+          item.status = nextStatus;
+          item.receivedBytes = received;
+          item.totalBytes = total;
+          item.progress = nextStatus == 'Completed' ? 100 : nextProgress;
+          item.error = data['reason']?.toString();
+        });
+      } on PlatformException catch (error) {
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          item.status = 'Failed';
+          item.error = error.message ?? 'Download status unavailable';
+        });
+      }
     }
   }
 
@@ -457,7 +471,7 @@ class _BrowserPageState extends State<BrowserPage> {
                                       width: 34,
                                       height: 34,
                                       child: CircularProgressIndicator(
-                                        value: item.progress > 0
+                                        value: item.totalBytes > 0
                                             ? item.progress / 100
                                             : null,
                                         strokeWidth: 3,
@@ -492,11 +506,21 @@ class _BrowserPageState extends State<BrowserPage> {
                                     Padding(
                                       padding: const EdgeInsets.only(top: 6),
                                       child: LinearProgressIndicator(
-                                        value: item.progress > 0
+                                        value: item.totalBytes > 0
                                             ? item.progress / 100
                                             : null,
                                         minHeight: 3,
                                         backgroundColor: Colors.white12,
+                                      ),
+                                    ),
+                                  if (item.status == 'Failed' &&
+                                      item.error != null)
+                                    Text(
+                                      item.error!,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.redAccent,
                                       ),
                                     ),
                                 ],
@@ -516,7 +540,7 @@ class _BrowserPageState extends State<BrowserPage> {
   Widget _downloadButton() {
     DownloadItem? active;
     for (final item in _downloads) {
-      if (item.status == 'Downloading') {
+      if (item.status == 'Queued' || item.status == 'Downloading') {
         active = item;
         break;
       }
@@ -542,7 +566,7 @@ class _BrowserPageState extends State<BrowserPage> {
           alignment: Alignment.center,
           children: [
             CircularProgressIndicator(
-              value: active.progress > 0 ? active.progress / 100 : null,
+              value: active.totalBytes > 0 ? active.progress / 100 : null,
               strokeWidth: 2.5,
             ),
             Text(
@@ -561,9 +585,9 @@ class _BrowserPageState extends State<BrowserPage> {
 
   @override
   void dispose() {
+    _downloadPoller?.cancel();
     address.dispose();
     focus.dispose();
-    dio.close();
     super.dispose();
   }
 
