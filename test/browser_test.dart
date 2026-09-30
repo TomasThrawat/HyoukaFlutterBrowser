@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hyouka_browser/main.dart';
+import 'package:browser/main.dart';
 
 void main() {
   test('plain text is converted to a Google search', () {
