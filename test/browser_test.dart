@@ -50,6 +50,32 @@ void main() {
     );
   });
 
+
+  test('APK URLs are recognized as downloads', () {
+    expect(
+      isLikelyDownloadUrl(
+        Uri.parse('https://example.com/files/Browser.apk'),
+      ),
+      isTrue,
+    );
+  });
+
+  test('ordinary web pages are not recognized as downloads', () {
+    expect(
+      isLikelyDownloadUrl(Uri.parse('https://example.com/index.html')),
+      isFalse,
+    );
+  });
+
+  test('download query URLs are recognized as downloads', () {
+    expect(
+      isLikelyDownloadUrl(
+        Uri.parse('https://example.com/file?id=42&download=1'),
+      ),
+      isTrue,
+    );
+  });
+
   test('download file names collapse duplicate APK extensions', () {
     expect(
       downloadFileName(Uri.parse('https://example.com/files/MyApp.apk.apk')),

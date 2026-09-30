@@ -210,6 +210,7 @@ class _BrowserPageState extends State<BrowserPage> {
   final List<DownloadItem> _downloads = <DownloadItem>[];
 
   Timer? _downloadPoller;
+  final Set<String> _downloadUrls = <String>{};
   int progress = 0;
   bool _adBlockEnabled = true;
   bool _googleFallbackUsed = false;
@@ -403,34 +404,64 @@ class _BrowserPageState extends State<BrowserPage> {
     await controller.reload();
   }
 
-  Future<void> _openDownloadsFolder() async {
-    try {
-      final opened = await _downloadChannel.invokeMethod<bool>('openDownloads');
-      if (opened != true) {
-        _showMessage('Could not open the Downloads folder.');
-      }
-    } on PlatformException catch (error) {
-      _showMessage(
-        'Could not open Downloads: ' + (error.message ?? 'unknown error'),
-      );
-    }
+    bool _isLikelyDownloadUrl(Uri uri) {
+    const downloadableExtensions = <String>{
+      'apk',
+      'zip',
+      'rar',
+      '7z',
+      'pdf',
+      'doc',
+      'docx',
+      'xls',
+      'xlsx',
+      'ppt',
+      'pptx',
+      'csv',
+      'txt',
+      'mp3',
+      'wav',
+      'm4a',
+      'mp4',
+      'mkv',
+      'avi',
+      'mov',
+      'jpg',
+      'jpeg',
+      'png',
+      'gif',
+      'webp',
+    };
+
+    final lastSegment =
+        uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.toLowerCase();
+    final extensionIndex = lastSegment.lastIndexOf('.');
+    final extension =
+        extensionIndex >= 0 ? lastSegment.substring(extensionIndex + 1) : '';
+    final hasDownloadQuery = uri.queryParameters.keys.any(
+      (key) => key.toLowerCase() == 'download',
+    );
+
+    return downloadableExtensions.contains(extension) || hasDownloadQuery;
   }
 
-  Future<void> _downloadCurrentPage() async {
-    final input = address.text.trim();
-    final uri = Uri.tryParse(input);
-
-    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
-      _showMessage('Enter a valid HTTP or HTTPS address first.');
+  Future<void> _trackDownloadUrl(Uri uri) async {
+    if (!_isLikelyDownloadUrl(uri)) {
       return;
     }
 
+    final key = uri.toString();
+    if (!_downloadUrls.add(key)) {
+      return;
+    }
+
+    final fileName = downloadFileName(uri);
+
     try {
-      final fileName = downloadFileName(uri);
       final nativeId = await _downloadChannel.invokeMethod<int>(
         'startDownload',
         <String, dynamic>{
-          'url': input,
+          'url': key,
           'fileName': fileName,
         },
       );
@@ -440,7 +471,7 @@ class _BrowserPageState extends State<BrowserPage> {
       }
 
       final item = DownloadItem(
-        url: input,
+        url: key,
         fileName: fileName,
         nativeId: nativeId,
       );
@@ -450,6 +481,7 @@ class _BrowserPageState extends State<BrowserPage> {
       });
       _ensureDownloadPolling();
     } on PlatformException catch (error) {
+      _downloadUrls.remove(key);
       _showMessage(
         'Download could not start: ' + (error.message ?? 'unknown error'),
       );
@@ -462,7 +494,7 @@ class _BrowserPageState extends State<BrowserPage> {
     }
 
     _downloadPoller = Timer.periodic(
-      const Duration(milliseconds: 400),
+      const Duration(seconds: 1),
       (_) => _pollDownloads(),
     );
   }
@@ -609,38 +641,60 @@ class _BrowserPageState extends State<BrowserPage> {
     }
 
     if (active == null) {
-      return IconButton(
-        tooltip: 'Download',
-        onPressed: _downloadCurrentPage,
-        icon: const Icon(Icons.download_rounded),
+      return const SizedBox(
+        width: 40,
+        height: 40,
+        child: Center(
+          child: Icon(Icons.download_rounded),
+        ),
       );
     }
 
     final percent = active.progress.round();
 
-    return IconButton(
-      tooltip: 'Open Downloads',
-      onPressed: _openDownloadsFolder,
-      icon: SizedBox(
-        width: 34,
-        height: 34,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            CircularProgressIndicator(
-              value: active.totalBytes > 0 ? active.progress / 100 : null,
-              strokeWidth: 2.5,
+    return SizedBox(
+      width: 82,
+      height: 40,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          SizedBox(
+            width: 34,
+            height: 34,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(
+                  value:
+                      active.totalBytes > 0 ? active.progress / 100 : null,
+                  strokeWidth: 2.5,
+                ),
+                Text(
+                  '$percent%',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
-            Text(
-              '$percent%',
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              active.fileName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
               style: const TextStyle(
-                color: Colors.white,
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
+                color: Colors.white70,
+                fontSize: 8,
+                fontWeight: FontWeight.w600,
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -688,6 +742,7 @@ class _BrowserPageState extends State<BrowserPage> {
                     setState(() {
                       address.text = url.toString();
                     });
+                    unawaited(_trackDownloadUrl(url));
                   },
                   onProgress: (value) {
                     if (!mounted) {

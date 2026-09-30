@@ -2,7 +2,6 @@ package com.search.browser
 
 import android.app.DownloadManager
 import android.content.Context
-import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
 import android.os.Environment
@@ -30,7 +29,6 @@ class MainActivity : FlutterActivity() {
                 "startDownload" -> startDownload(call, result)
                 "getDownloadStatus" -> getDownloadStatus(call, result)
                 "removeDownload" -> removeDownload(call, result)
-                "openDownloads" -> openDownloads(result)
                 else -> result.notImplemented()
             }
         }
@@ -141,29 +139,6 @@ class MainActivity : FlutterActivity() {
             )
         } finally {
             cursor?.close()
-        }
-    }
-
-    private fun openDownloads(result: MethodChannel.Result) {
-        try {
-            val intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (intent.resolveActivity(packageManager) == null) {
-                result.error(
-                    "NO_FILE_APP",
-                    "No app can open the Downloads folder.",
-                    null,
-                )
-                return
-            }
-            startActivity(intent)
-            result.success(true)
-        } catch (exception: Exception) {
-            result.error(
-                "OPEN_DOWNLOADS_FAILED",
-                exception.message ?: "Could not open the Downloads folder.",
-                null,
-            )
         }
     }
 
