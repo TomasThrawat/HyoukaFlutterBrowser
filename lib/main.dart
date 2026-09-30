@@ -146,9 +146,8 @@ bool isLikelyDownloadUrl(Uri uri) {
       (key) => key.toLowerCase() == 'download',
     );
 
-    return downloadableExtensions.contains(extension) || hasDownloadQuery;
-  }
-
+  return downloadableExtensions.contains(extension) || hasDownloadQuery;
+}
 
 String downloadFileName(Uri uri) {
   final segment =
@@ -447,7 +446,7 @@ class _BrowserPageState extends State<BrowserPage> {
   }
 
     Future<void> _trackDownloadUrl(Uri uri) async {
-    if (!_isLikelyDownloadUrl(uri)) {
+    if (!isLikelyDownloadUrl(uri)) {
       return;
     }
 
