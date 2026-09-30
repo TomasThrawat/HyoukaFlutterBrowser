@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:adblocker_webview/adblocker_webview.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const homeUrl = 'https://www.google.com/';
 const _historyKey = 'browser_history';
+const _downloadsKey = 'browser_downloads';
 const _maxHistoryItems = 100;
 const _downloadChannel = MethodChannel('hyouka.browser/native_downloads');
 const _adBlockKey = 'ad_block_enabled';
@@ -194,6 +196,17 @@ class DownloadItem {
     required this.nativeId,
   });
 
+  DownloadItem.fromJson(Map<String, dynamic> json)
+      : url = json['url']?.toString() ?? '',
+        fileName = json['fileName']?.toString() ?? 'browser_download.bin',
+        nativeId = (json['nativeId'] as num?)?.toInt() ?? -1 {
+    progress = (json['progress'] as num?)?.toDouble() ?? 0;
+    status = json['status']?.toString() ?? 'Queued';
+    error = json['error']?.toString();
+    receivedBytes = (json['receivedBytes'] as num?)?.toInt() ?? 0;
+    totalBytes = (json['totalBytes'] as num?)?.toInt() ?? 0;
+  }
+
   final String url;
   final String fileName;
   final int nativeId;
@@ -202,6 +215,19 @@ class DownloadItem {
   String? error;
   int receivedBytes = 0;
   int totalBytes = 0;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'url': url,
+      'fileName': fileName,
+      'nativeId': nativeId,
+      'progress': progress,
+      'status': status,
+      'error': error,
+      'receivedBytes': receivedBytes,
+      'totalBytes': totalBytes,
+    };
+  }
 }
 
 Future<void> main() async {
@@ -272,6 +298,8 @@ class _BrowserPageState extends State<BrowserPage> {
   Timer? _downloadPoller;
   final ValueNotifier<int> _downloadRevision = ValueNotifier<int>(0);
   final Set<String> _downloadUrls = <String>{};
+  late final Future<void> _downloadsReady;
+  bool _downloadPollInProgress = false;
   int progress = 0;
   bool _adBlockEnabled = true;
   bool _googleFallbackUsed = false;
@@ -284,6 +312,7 @@ class _BrowserPageState extends State<BrowserPage> {
     controller.resetStatistics();
     _loadHistory();
     _loadAdBlockPreference();
+    _downloadsReady = _loadDownloads();
   }
 
   Future<void> _loadAdBlockPreference() async {
@@ -294,6 +323,69 @@ class _BrowserPageState extends State<BrowserPage> {
     setState(() {
       _adBlockEnabled = saved;
     });
+  }
+
+  Future<void> _loadDownloads() async {
+    final saved = await prefs.getString(_downloadsKey);
+    if (saved == null || saved.isEmpty) {
+      return;
+    }
+
+    try {
+      final decoded = jsonDecode(saved);
+      if (decoded is! List) {
+        return;
+      }
+
+      final restored = <DownloadItem>[];
+      for (final value in decoded) {
+        if (value is! Map) {
+          continue;
+        }
+        final item = DownloadItem.fromJson(
+          Map<String, dynamic>.from(value),
+        );
+        if (item.url.isEmpty || item.nativeId <= 0) {
+          continue;
+        }
+        restored.add(item);
+        _downloadUrls.add(item.url);
+      }
+
+      if (!mounted || restored.isEmpty) {
+        return;
+      }
+
+      setState(() {
+        _downloads
+          ..clear()
+          ..addAll(restored);
+      });
+      _downloadRevision.value++;
+      if (restored.any(
+        (item) => item.status == 'Queued' || item.status == 'Downloading',
+      )) {
+        _ensureDownloadPolling();
+        await _pollDownloads();
+      }
+    } catch (_) {
+      // Ignore a corrupted local download history and keep the browser usable.
+    }
+  }
+
+  Future<void> _saveDownloads() async {
+    try {
+      await prefs.setString(
+        _downloadsKey,
+        jsonEncode(
+          _downloads
+              .map((item) => item.toJson())
+              .toList(growable: false),
+        ),
+      );
+    } catch (_) {
+      // Download UI should remain usable even if local history cannot be saved.
+    }
   }
 
   Future<void> _toggleAdBlock() async {
@@ -466,7 +558,8 @@ class _BrowserPageState extends State<BrowserPage> {
   }
 
     Future<void> _trackDownloadUrl(Uri uri) async {
-    if (!isLikelyDownloadUrl(uri)) {
+    await _downloadsReady;
+    if (!mounted || !isLikelyDownloadUrl(uri)) {
       return;
     }
 
@@ -500,6 +593,7 @@ class _BrowserPageState extends State<BrowserPage> {
         _downloads.insert(0, item);
       });
       _downloadRevision.value++;
+      unawaited(_saveDownloads());
       _ensureDownloadPolling();
     } on PlatformException catch (error) {
       _downloadUrls.remove(key);
@@ -521,19 +615,25 @@ class _BrowserPageState extends State<BrowserPage> {
   }
 
   Future<void> _pollDownloads() async {
-    final active = _downloads
-        .where(
-          (item) => item.status == 'Queued' || item.status == 'Downloading',
-        )
-        .toList();
-
-    if (active.isEmpty) {
-      _downloadPoller?.cancel();
-      _downloadPoller = null;
+    if (_downloadPollInProgress) {
       return;
     }
+    _downloadPollInProgress = true;
 
-    for (final item in active) {
+    try {
+      final active = _downloads
+          .where(
+            (item) => item.status == 'Queued' || item.status == 'Downloading',
+          )
+          .toList();
+
+      if (active.isEmpty) {
+        _downloadPoller?.cancel();
+        _downloadPoller = null;
+        return;
+      }
+
+      for (final item in active) {
       try {
         final data = await _downloadChannel.invokeMapMethod<String, dynamic>(
           'getDownloadStatus',
@@ -559,17 +659,24 @@ class _BrowserPageState extends State<BrowserPage> {
           item.error = data['reason']?.toString();
         });
         _downloadRevision.value++;
-      } on PlatformException catch (error) {
-        if (!mounted) {
-          return;
-        }
+        } on PlatformException catch (error) {
+          if (!mounted) {
+            continue;
+          }
 
-        setState(() {
-          item.status = 'Failed';
-          item.error = error.message ?? 'Download status unavailable';
-        });
-        _downloadRevision.value++;
+          setState(() {
+            item.status = 'Failed';
+            item.error = error.message ?? 'Download status unavailable';
+          });
+          _downloadRevision.value++;
+        }
       }
+
+      if (mounted) {
+        unawaited(_saveDownloads());
+      }
+    } finally {
+      _downloadPollInProgress = false;
     }
   }
 
