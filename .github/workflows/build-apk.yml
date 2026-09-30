@@ -54,6 +54,11 @@ jobs:
           test -s "$NATIVE_DIR/MainActivity.kt"
           rm "$NATIVE_DIR/MainActivity.kt"
           cp android_native/MainActivity.kt "$NATIVE_DIR/MainActivity.kt"
+      - name: Apply browser hardening patch
+        run: |
+          set -euo pipefail
+          test -s tooling/patch_browser_build.py
+          python3 tooling/patch_browser_build.py
       - name: Configure Gradle
         run: printf '\norg.gradle.vfs.watch=false\n' >> android/gradle.properties
       - name: Configure Android manifest
@@ -78,6 +83,15 @@ jobs:
           grep -q 'class MainActivity' "$NATIVE"
           grep -q 'MethodChannel' "$NATIVE"
           grep -q 'DownloadManager' "$NATIVE"
+          grep -q 'addRequestHeader' "$NATIVE"
+          grep -q 'Referer' "$NATIVE"
+          grep -q 'Cookie' "$NATIVE"
+          grep -q 'User-Agent' "$NATIVE"
+          grep -q "readilyprobablechow.shop" lib/main.dart
+          grep -q "nexus-nexus-ba.github.io" lib/main.dart
+          grep -q "inthedungeons123.lol" lib/main.dart
+          grep -q "'referer': referer" lib/main.dart
+          grep -q "'userAgent': _browserUserAgent" lib/main.dart
           grep -q 'native_downloads' lib/main.dart
           grep -q "class BrowserApp" lib/main.dart
           grep -q "title: 'Browser'" lib/main.dart
@@ -136,3 +150,4 @@ jobs:
 
           echo "GitHub release creation failed after 5 attempts."
           exit 1
+
