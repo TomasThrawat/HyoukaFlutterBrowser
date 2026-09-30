@@ -127,18 +127,16 @@ if not widget.is_file():
 w = widget.read_text()
 
 if "this.onDownloadStart," not in w:
-    constructor_anchor = "    this.onUrlChanged,
-"
+    constructor_anchor = "    this.onUrlChanged," + chr(10)
     if constructor_anchor not in w:
         raise SystemExit("adblocker constructor anchor not found")
     w = w.replace(
         constructor_anchor,
-        constructor_anchor + "    this.onDownloadStart,
-",
+        constructor_anchor + "    this.onDownloadStart," + chr(10),
         1,
     )
 
-callback_field = r"""  /// Invoked when Android WebView reports a download request.
+callback_field = """  /// Invoked when Android WebView reports a download request.
   final void Function(
     String url,
     String userAgent,
@@ -147,36 +145,31 @@ callback_field = r"""  /// Invoked when Android WebView reports a download reque
     int contentLength,
   )? onDownloadStart;
 """
-old_field = "  final DownloadListener? onDownloadStart;
-"
-field_anchor = "  final void Function(String? url)? onUrlChanged;
-"
+old_field = "  final DownloadListener? onDownloadStart;" + chr(10)
+field_anchor = "  final void Function(String? url)? onUrlChanged;" + chr(10)
 if callback_field not in w:
     if old_field in w:
         w = w.replace(old_field, callback_field, 1)
     elif field_anchor in w:
-        w = w.replace(field_anchor, field_anchor + "
-" + callback_field, 1)
+        w = w.replace(field_anchor, field_anchor + chr(10) + callback_field, 1)
     else:
         raise SystemExit("adblocker download callback field anchor not found")
 
-listener_call = r"""    if (_webViewController.platform is AndroidWebViewController &&
+listener_call = """    if (_webViewController.platform is AndroidWebViewController &&
         widget.onDownloadStart != null) {
       await (_webViewController.platform as AndroidWebViewController)
           .setDownloadListener(widget.onDownloadStart);
     }
 """
 if "setDownloadListener(widget.onDownloadStart)" not in w:
-    nav_anchor = "    _setNavigationDelegate();
-"
+    nav_anchor = "    _setNavigationDelegate();" + chr(10)
     if nav_anchor not in w:
         raise SystemExit("adblocker navigation delegate anchor not found")
     w = w.replace(nav_anchor, nav_anchor + listener_call, 1)
 
 for required in (
     "this.onDownloadStart,",
-    "final void Function(
-    String url,",
+    "final void Function(",
     "setDownloadListener(widget.onDownloadStart)",
 ):
     if required not in w:
