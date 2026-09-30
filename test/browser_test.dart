@@ -49,4 +49,25 @@ void main() {
       'test.pdf',
     );
   });
+
+  test('download file names collapse duplicate APK extensions', () {
+    expect(
+      downloadFileName(Uri.parse('https://example.com/files/MyApp.apk.apk')),
+      'MyApp.apk',
+    );
+  });
+
+  test('download file names collapse duplicate ZIP extensions', () {
+    expect(
+      downloadFileName(Uri.parse('https://example.com/files/archive.zip.zip')),
+      'archive.zip',
+    );
+  });
+
+  test('download file names remove browser temporary suffixes', () {
+    expect(
+      downloadFileName(Uri.parse('https://example.com/files/archive.zip.kkl')),
+      'archive.zip',
+    );
+  });
 }

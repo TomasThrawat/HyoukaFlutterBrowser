@@ -2,6 +2,7 @@ package com.search.browser
 
 import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
 import android.os.Environment
@@ -29,6 +30,7 @@ class MainActivity : FlutterActivity() {
                 "startDownload" -> startDownload(call, result)
                 "getDownloadStatus" -> getDownloadStatus(call, result)
                 "removeDownload" -> removeDownload(call, result)
+                "openDownloads" -> openDownloads(result)
                 else -> result.notImplemented()
             }
         }
@@ -98,6 +100,29 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun openDownloads(result: MethodChannel.Result) {
+        try {
+            val intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (intent.resolveActivity(packageManager) == null) {
+                result.error(
+                    "NO_FILE_APP",
+                    "No app can open the Downloads folder.",
+                    null,
+                )
+                return
+            }
+            startActivity(intent)
+            result.success(true)
+        } catch (exception: Exception) {
+            result.error(
+                "OPEN_DOWNLOADS_FAILED",
+                exception.message ?: "Could not open the Downloads folder.",
+                null,
+            )
+        }
+    }
+
     private fun removeDownload(call: MethodCall, result: MethodChannel.Result) {
         val id = call.arguments as? Number
         if (id == null) {
@@ -114,10 +139,42 @@ class MainActivity : FlutterActivity() {
     private fun sanitizeFileName(value: String?): String {
         val input = value?.trim().orEmpty()
         val sanitized = input
-            .replace(Regex("[<>:\"/\\\\|?*]"), "_")
-            .replace(Regex("\\s+"), " ")
+            .replace(Regex("[<>:"/\|?*]"), "_")
+            .replace(Regex("\s+"), " ")
             .trim()
             .take(180)
-        return sanitized.ifBlank { "browser_download.bin" }
+
+        var normalized = sanitized.ifBlank { "browser_download.bin" }
+
+        while (normalized.endsWith(".kkl", ignoreCase = true)) {
+            normalized = normalized.dropLast(4).trim()
+        }
+
+        while (
+            normalized.endsWith(".crdownload", ignoreCase = true) ||
+            normalized.endsWith(".download", ignoreCase = true) ||
+            normalized.endsWith(".part", ignoreCase = true) ||
+            normalized.endsWith(".tmp", ignoreCase = true)
+        ) {
+            normalized = when {
+                normalized.endsWith(".crdownload", ignoreCase = true) ->
+                    normalized.dropLast(".crdownload".length)
+                normalized.endsWith(".download", ignoreCase = true) ->
+                    normalized.dropLast(".download".length)
+                normalized.endsWith(".part", ignoreCase = true) ->
+                    normalized.dropLast(".part".length)
+                else -> normalized.dropLast(".tmp".length)
+            }.trim()
+        }
+
+        for (extension in listOf(".apk", ".zip")) {
+            while (
+                normalized.endsWith(extension + extension, ignoreCase = true)
+            ) {
+                normalized = normalized.dropLast(extension.length).trim()
+            }
+        }
+
+        return normalized.ifBlank { "browser_download.bin" }
     }
 }

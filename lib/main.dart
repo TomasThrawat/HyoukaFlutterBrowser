@@ -77,17 +77,49 @@ List<String> addHistoryEntry(
   return result;
 }
 
+String _normalizeDownloadFileName(String value) {
+  var result = value.trim();
+
+  while (result.toLowerCase().endsWith('.kkl')) {
+    result = result.substring(0, result.length - 4).trim();
+  }
+
+  while (result.toLowerCase().endsWith('.crdownload') ||
+      result.toLowerCase().endsWith('.download') ||
+      result.toLowerCase().endsWith('.part') ||
+      result.toLowerCase().endsWith('.tmp')) {
+    final lower = result.toLowerCase();
+    final extension = lower.endsWith('.crdownload')
+        ? '.crdownload'
+        : lower.endsWith('.download')
+            ? '.download'
+            : lower.endsWith('.part')
+                ? '.part'
+                : '.tmp';
+    result = result.substring(0, result.length - extension.length).trim();
+  }
+
+  for (final extension in <String>['.apk', '.zip']) {
+    while (result.toLowerCase().endsWith(extension + extension)) {
+      result = result.substring(0, result.length - extension.length).trim();
+    }
+  }
+
+  return result;
+}
+
 String downloadFileName(Uri uri) {
   final segment =
       uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.trim();
   final raw = segment.isEmpty ? 'page.html' : segment;
   final sanitized = raw
-      .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
+      .replaceAll(RegExp(r'[<>:"/\|?*]'), '_')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
+  final normalized = _normalizeDownloadFileName(sanitized);
 
-  if (sanitized.isNotEmpty) {
-    return sanitized;
+  if (normalized.isNotEmpty) {
+    return normalized;
   }
 
   return 'hyouka_download_' +
@@ -369,6 +401,19 @@ class _BrowserPageState extends State<BrowserPage> {
 
   Future<void> _reload() async {
     await controller.reload();
+  }
+
+  Future<void> _openDownloadsFolder() async {
+    try {
+      final opened = await _downloadChannel.invokeMethod<bool>('openDownloads');
+      if (opened != true) {
+        _showMessage('Could not open the Downloads folder.');
+      }
+    } on PlatformException catch (error) {
+      _showMessage(
+        'Could not open Downloads: ' + (error.message ?? 'unknown error'),
+      );
+    }
   }
 
   Future<void> _downloadCurrentPage() async {
@@ -681,8 +726,8 @@ class _BrowserPageState extends State<BrowserPage> {
     final percent = active.progress.round();
 
     return IconButton(
-      tooltip: 'Downloads',
-      onPressed: _showDownloads,
+      tooltip: 'Open Downloads',
+      onPressed: _openDownloadsFolder,
       icon: SizedBox(
         width: 34,
         height: 34,
