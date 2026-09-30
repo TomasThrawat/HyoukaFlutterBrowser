@@ -82,7 +82,7 @@ String downloadFileName(Uri uri) {
       uri.pathSegments.isEmpty ? '' : uri.pathSegments.last.trim();
   final raw = segment.isEmpty ? 'page.html' : segment;
   final sanitized = raw
-      .replaceAll(RegExp(r'[<>:"/\\\\|?*]'), '_')
+      .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
 
@@ -345,7 +345,7 @@ class _BrowserPageState extends State<BrowserPage> {
         final query = _pendingGoogleSearch ?? url.queryParameters['q'];
         if (query != null && query.isNotEmpty && mounted) {
           _googleFallbackUsed = true;
-              _pendingGoogleSearch = null;
+          _pendingGoogleSearch = null;
           final fallback =
               'https://www.bing.com/search?q=' + Uri.encodeQueryComponent(query);
           await controller.loadUrl(fallback);
@@ -730,9 +730,9 @@ class _BrowserPageState extends State<BrowserPage> {
                   shouldBlockAds: _adBlockEnabled,
                   adBlockerWebviewController: controller,
                   userAgent:
-                      'Mozilla/5.0 (X11; Linux x86_64) '
+                      'Mozilla/5.0 (Linux; Android 12; CPH2095) '
                       'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/140.0.0.0 Safari/537.36',
+                      'Chrome/140.0.0.0 Mobile Safari/537.36',
                   onLoadStart: (url) {
                     if (!mounted) {
                       return;
@@ -882,4 +882,5 @@ class _BrowserPageState extends State<BrowserPage> {
         ),
       ),
     );
-  }}
+  }
+}
