@@ -12,6 +12,7 @@ const _downloadChannel = MethodChannel('hyouka.browser/native_downloads');
 const _adBlockKey = 'ad_block_enabled';
 
 const _extraBlockedDomains = <String>[
+  'click.a-ads.com',
   'doubleclick.net',
   'googlesyndication.com',
   'googleadservices.com',
