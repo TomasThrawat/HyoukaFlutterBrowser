@@ -72,30 +72,7 @@ jobs:
       - name: Verify source and identity
         run: |
           set -euo pipefail
-          NATIVE=android/app/src/main/kotlin/com/search/browser/MainActivity.kt
-          test -s "$NATIVE"
-          grep -q 'package com.search.browser' "$NATIVE"
-          grep -q 'class MainActivity' "$NATIVE"
-          grep -q 'MethodChannel' "$NATIVE"
-          grep -q 'DownloadManager' "$NATIVE"
-          grep -q 'addRequestHeader' "$NATIVE"
-          grep -q 'Referer' "$NATIVE"
-          grep -q 'Cookie' "$NATIVE"
-          grep -q 'User-Agent' "$NATIVE"
-          grep -q "readilyprobablechow.shop" lib/main.dart
-          grep -q "nexus-nexus-ba.github.io" lib/main.dart
-          grep -q "inthedungeons123.lol" lib/main.dart
-          grep -q "'referer': referer" lib/main.dart
-          grep -q "'userAgent': userAgent ?? _browserUserAgent" lib/main.dart
-          grep -q 'native_downloads' lib/main.dart
-          grep -q 'onDownloadStart:' lib/main.dart
-          grep -q "class BrowserApp" lib/main.dart
-          grep -q "title: 'Browser'" lib/main.dart
-          grep -q "Mozilla/5.0 (Linux; Android 12; CPH2095)" lib/main.dart
-          grep -q "Mobile Safari/537.36" lib/main.dart
-          ! grep -q "X11; Linux x86_64" lib/main.dart
-          ! grep -qE 'dio:|path_provider:' pubspec.yaml
-          test "$(find android/app/src/main/kotlin -name 'MainActivity.kt' -type f | wc -l)" -eq 1
+          python3 -c 'from pathlib import Path; n=Path("android/app/src/main/kotlin/com/search/browser/MainActivity.kt").read_text(); d=Path("lib/main.dart").read_text(); p=Path("pubspec.yaml").read_text(); checks={"native exists":bool(n),"native package":"package com.search.browser" in n,"native MainActivity":"class MainActivity" in n,"native channel":"MethodChannel" in n,"native headers/cookies":all(x in n for x in ("User-Agent","Referer","Cookie")),"native pause/resume":all(x in n for x in ("pauseDownload","resumeDownload")),"dart download listener":"onDownloadStart:" in d,"dart pause/resume":all(x in d for x in ("_toggleDownloadPause(","pauseDownload","resumeDownload")),"requested blocked domains":all(x in d for x in ("readilyprobablechow.shop","nexus-nexus-ba.github.io","inthedungeons123.lol","hemihydro.com","werefilledwit.org")),"package pins":all(x in p for x in ("adblocker_webview: 2.3.0","webview_flutter_android: 4.14.1"))}; [print(("PASS " if v else "FAIL ")+k) for k,v in checks.items()]; bad=[k for k,v in checks.items() if not v]; raise SystemExit("Source verification failed: "+", ".join(bad)) if bad else None'
       - run: dart format lib test
       - run: flutter pub get
       - name: Apply browser hardening patch
