@@ -213,27 +213,70 @@ class MainActivity : FlutterActivity() {
 
             while (redirectCount <= 6) {
                 val cookie = CookieManager.getInstance().getCookie(currentUrl)
+                val requestProfiles = listOf(
+                    true to true,
+                    true to false,
+                    false to false,
+                )
+                var responseCode = -1
 
-                connection = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    instanceFollowRedirects = false
-                    connectTimeout = 20_000
-                    readTimeout = 30_000
-                    setRequestProperty("User-Agent", metadata.userAgent)
-                    setRequestProperty("Accept", "*/*")
-                    setRequestProperty(
-                        "Accept-Language",
-                        Locale.getDefault().toLanguageTag(),
-                    )
-                    if (!cookie.isNullOrBlank()) {
-                        setRequestProperty("Cookie", cookie)
+                for ((sendReferer, browserAccept) in requestProfiles) {
+                    connection?.disconnect()
+                    connection = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        instanceFollowRedirects = false
+                        connectTimeout = 20_000
+                        readTimeout = 30_000
+                        setRequestProperty("User-Agent", metadata.userAgent)
+                        setRequestProperty(
+                            "Accept",
+                            if (browserAccept) {
+                                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+                            } else {
+                                "*/*"
+                            },
+                        )
+                        setRequestProperty(
+                            "Accept-Language",
+                            Locale.getDefault().toLanguageTag(),
+                        )
+                        setRequestProperty("Sec-Fetch-Dest", "document")
+                        setRequestProperty("Sec-Fetch-Mode", "navigate")
+                        setRequestProperty("Sec-Fetch-User", "?1")
+                        if (!cookie.isNullOrBlank()) {
+                            setRequestProperty("Cookie", cookie)
+                        }
+                        if (sendReferer &&
+                            !currentReferer.isNullOrBlank() &&
+                            currentReferer != currentUrl
+                        ) {
+                            setRequestProperty("Referer", currentReferer)
+                            try {
+                                val refererUri = Uri.parse(currentReferer)
+                                val targetUri = Uri.parse(currentUrl)
+                                if (refererUri.scheme == targetUri.scheme &&
+                                    refererUri.host == targetUri.host
+                                ) {
+                                    setRequestProperty("Sec-Fetch-Site", "same-origin")
+                                    setRequestProperty(
+                                        "Origin",
+                                        refererUri.scheme + "://" + refererUri.host,
+                                    )
+                                } else {
+                                    setRequestProperty("Sec-Fetch-Site", "cross-site")
+                                }
+                            } catch (_: Exception) {
+                                setRequestProperty("Sec-Fetch-Site", "cross-site")
+                            }
+                        } else {
+                            setRequestProperty("Sec-Fetch-Site", "none")
+                        }
                     }
-                    if (!currentReferer.isNullOrBlank() && currentReferer != currentUrl) {
-                        setRequestProperty("Referer", currentReferer)
+                    responseCode = connection.responseCode
+                    if (responseCode != 403) {
+                        break
                     }
                 }
-
-                val responseCode = connection.responseCode
 
                 if (responseCode in 300..399) {
                     val location = connection.getHeaderField("Location")
@@ -263,6 +306,24 @@ class MainActivity : FlutterActivity() {
                 val mimeType = metadata.mimeType
                     ?: responseType
                     ?: "application/octet-stream"
+                val resolvedFileName = connection.getHeaderField("Content-Disposition")
+                    ?.let { disposition ->
+                        Regex("""filename\*=(?:UTF-8''|)([^;]+)""", RegexOption.IGNORE_CASE)
+                            .find(disposition)
+                            ?.groupValues
+                            ?.getOrNull(1)
+                            ?.trim()
+                            ?.trim('"')
+                            ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+                            ?: Regex("""filename\s*=\s*"?([^";]+)"?""", RegexOption.IGNORE_CASE)
+                                .find(disposition)
+                                ?.groupValues
+                                ?.getOrNull(1)
+                                ?.trim()
+                    }
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(::sanitizeFileName)
+                    ?: metadata.fileName
                 val total = connection.contentLengthLong
                 job.totalBytes = if (total > 0) total else 0
 
@@ -271,7 +332,7 @@ class MainActivity : FlutterActivity() {
                 }
 
                 val values = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, metadata.fileName)
+                    put(MediaStore.Downloads.DISPLAY_NAME, resolvedFileName)
                     put(MediaStore.Downloads.MIME_TYPE, mimeType)
                     put(
                         MediaStore.Downloads.RELATIVE_PATH,
