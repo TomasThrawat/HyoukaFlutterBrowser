@@ -278,8 +278,11 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                val activeConnection = connection
+                    ?: throw IllegalStateException("Download connection was not created.")
+
                 if (responseCode in 300..399) {
-                    val location = connection.getHeaderField("Location")
+                    val location = activeConnection.getHeaderField("Location")
                     if (location.isNullOrBlank() || redirectCount >= 6) {
                         throw IllegalStateException("Redirect chain could not be completed.")
                     }
@@ -288,7 +291,7 @@ class MainActivity : FlutterActivity() {
                     currentReferer = currentUrl
                     currentUrl = nextUrl
                     redirectCount++
-                    connection.disconnect()
+                    activeConnection.disconnect()
                     connection = null
                     continue
                 }
@@ -300,13 +303,13 @@ class MainActivity : FlutterActivity() {
                     throw HttpException(responseCode)
                 }
 
-                val responseType = connection.contentType
+                val responseType = activeConnection.contentType
                     ?.substringBefore(';')
                     ?.trim()
                 val mimeType = metadata.mimeType
                     ?: responseType
                     ?: "application/octet-stream"
-                val resolvedFileName = connection.getHeaderField("Content-Disposition")
+                val resolvedFileName = activeConnection.getHeaderField("Content-Disposition")
                     ?.let { disposition ->
                         Regex("""filename\*=(?:UTF-8''|)([^;]+)""", RegexOption.IGNORE_CASE)
                             .find(disposition)
@@ -324,7 +327,7 @@ class MainActivity : FlutterActivity() {
                     ?.takeIf { it.isNotBlank() }
                     ?.let(::sanitizeFileName)
                     ?: metadata.fileName
-                val total = connection.contentLengthLong
+                val total = activeConnection.contentLengthLong
                 job.totalBytes = if (total > 0) total else 0
 
                 if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
@@ -348,7 +351,7 @@ class MainActivity : FlutterActivity() {
 
                 job.localUri = outputUri.toString()
 
-                connection.inputStream.use { input ->
+                activeConnection.inputStream.use { input ->
                     contentResolver.openOutputStream(outputUri!!).use { output ->
                         requireNotNull(output) { "Could not open the Downloads file." }
                         val buffer = ByteArray(32 * 1024)
