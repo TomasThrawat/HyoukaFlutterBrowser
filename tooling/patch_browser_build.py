@@ -184,8 +184,10 @@ listener_bridge = NL.join([
     "    if (_webViewController.platform is AndroidWebViewController &&",
     "        navigationDelegate.platform is AndroidNavigationDelegate &&",
     "        widget.onDownloadStart != null) {",
-    "      await (navigationDelegate.platform as AndroidNavigationDelegate)",
-    "          .setOnDownloadStart(widget.onDownloadStart!);",
+    "      unawaited(",
+    "        (navigationDelegate.platform as AndroidNavigationDelegate)",
+    "            .setOnDownloadStart(widget.onDownloadStart!),",
+    "      );",
     "    }",
 ])
 
