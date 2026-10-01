@@ -104,8 +104,7 @@ field = """  /// Invoked when Android WebView reports a download request.
   )? onDownloadStart;
 """
 if "String contentDisposition," not in ws:
-    anchor = "  final void Function(String? url)? onUrlChanged;
-"
+    anchor = "  final void Function(String? url)? onUrlChanged;" + chr(10)
     if anchor not in ws:
         raise SystemExit("adblocker callback field anchor not found")
     ws = ws.replace(anchor, anchor + "\n" + field, 1)
