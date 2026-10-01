@@ -68,7 +68,7 @@ android_root = android_candidates[0] / "lib" / "src"
 delegate_candidates = []
 for dart_file in sorted(android_root.rglob("*.dart")):
     text = dart_file.read_text()
-    if "class AndroidNavigationDelegate" in text and "androidDownloadListener" in text and "onDownloadStart:" in text:
+    if "class AndroidNavigationDelegate extends PlatformNavigationDelegate" in text and "androidDownloadListener" in text and "onDownloadStart:" in text:
         delegate_candidates.append(dart_file)
 
 if len(delegate_candidates) != 1:
@@ -88,7 +88,7 @@ field = NL.join([
 ])
 
 if "_onDownloadStart;" not in cs:
-    class_match = re.search(r"class\s+AndroidNavigationDelegate[^\{]*\{", cs)
+    class_match = re.search(r"class\s+AndroidNavigationDelegate\s+extends\s+PlatformNavigationDelegate\s*\{", cs)
     if class_match is None:
         raise SystemExit("AndroidNavigationDelegate class anchor not found")
     cs = cs[:class_match.end()] + NL + field + NL + cs[class_match.end():]
@@ -136,7 +136,10 @@ signature = NL.join([
 ])
 
 if "Future<void> setOnDownloadStart(" not in cs:
-    getter_match = re.search(r"  (?:android_webview\.)?DownloadListener\s+get\s+androidDownloadListener\s*=>", cs)
+    getter_match = re.search(
+        r"  (?:android_webview\.)?DownloadListener\s+get\s+androidDownloadListener\s*=>",
+        cs,
+    )
     if getter_match is None:
         raise SystemExit("AndroidNavigationDelegate download getter not found")
     cs = cs[:getter_match.start()] + signature + NL + NL + cs[getter_match.start():]
