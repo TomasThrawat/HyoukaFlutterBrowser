@@ -110,14 +110,14 @@ jobs:
       - name: Verify download listener patch
         run: |
           set -euo pipefail
-          ANDROID_PACKAGE="$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src/android_webview_controller.dart"
+          ANDROID_ROOT="$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src"
           ADBLOCK_PACKAGE="$HOME/.pub-cache/hosted/pub.dev/adblocker_webview-2.3.0/lib/src/adblocker_webview.dart"
-          test -f "$ANDROID_PACKAGE"
+          DELEGATE_FILE="$(grep -Rl -m1 "class AndroidNavigationDelegate" "$ANDROID_ROOT" | head -n 1)"
+          test -n "$DELEGATE_FILE"
           test -f "$ADBLOCK_PACKAGE"
-          grep -R -q "class AndroidNavigationDelegate" "$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src"
-          grep -R -q "Future<void> setOnDownloadStart(" "$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src"
-          grep -R -q "android_webview.DownloadListener" "$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src"
-          grep -R -q "_onDownloadStart;" "$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src"
+          grep -q "Future<void> setOnDownloadStart(" "$DELEGATE_FILE"
+          grep -q "_onDownloadStart;" "$DELEGATE_FILE"
+          grep -q "onDownloadStart:" "$DELEGATE_FILE"
           grep -q "this.onDownloadStart," "$ADBLOCK_PACKAGE"
           grep -q "setOnDownloadStart(widget.onDownloadStart!)" "$ADBLOCK_PACKAGE"
           grep -q "onDownloadStart:" lib/main.dart
