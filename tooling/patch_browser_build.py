@@ -76,8 +76,8 @@ field = """  void Function(
   )? _onDownloadStart;
 """
 if "_onDownloadStart;" not in cs:
-    anchor = "  late final android_webview.DownloadListener _downloadListener;
-"
+    anchor = """  late final android_webview.DownloadListener _downloadListener;
+"""
     if anchor not in cs:
         raise SystemExit(
             "AndroidNavigationDelegate download listener declaration not found"
@@ -175,8 +175,8 @@ callback_field = """  /// Invoked when Android WebView reports a download reques
   )? onDownloadStart;
 """
 if "this.onDownloadStart," not in ws:
-    constructor_anchor = "    this.onUrlChanged,
-"
+    constructor_anchor = """    this.onUrlChanged,
+"""
     if constructor_anchor not in ws:
         raise SystemExit("AdBlockerWebview constructor anchor not found")
     ws = ws.replace(
@@ -187,8 +187,8 @@ if "this.onDownloadStart," not in ws:
     )
 
 if "? onDownloadStart;" not in ws:
-    field_anchor = "  final void Function(String? url)? onUrlChanged;
-"
+    field_anchor = """  final void Function(String? url)? onUrlChanged;
+"""
     if field_anchor not in ws:
         raise SystemExit("AdBlockerWebview callback field anchor not found")
     ws = ws.replace(
@@ -207,8 +207,8 @@ listener_bridge = """    if (_webViewController.platform is AndroidWebViewContro
 
 """
 if "setOnDownloadStart(widget.onDownloadStart!)" not in ws:
-    target = "    await _webViewController.setNavigationDelegate(navigationDelegate);
-"
+    target = """    await _webViewController.setNavigationDelegate(navigationDelegate);
+"""
     if target not in ws:
         raise SystemExit("AdBlockerWebview navigation delegate target not found")
     ws = ws.replace(target, listener_bridge + target, 1)

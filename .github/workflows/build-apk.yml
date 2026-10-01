@@ -105,6 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           test -s tooling/patch_browser_build.py
+          python3 -m py_compile tooling/patch_browser_build.py
           python3 tooling/patch_browser_build.py
       - name: Verify download listener patch
         run: |
