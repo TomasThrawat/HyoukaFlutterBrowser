@@ -103,10 +103,7 @@ field = """  /// Invoked when Android WebView reports a download request.
     int contentLength,
   )? onDownloadStart;
 """
-if "final void Function(
-    String url,
-    String userAgent,
-    String contentDisposition" not in ws:
+if "String contentDisposition," not in ws:
     anchor = "  final void Function(String? url)? onUrlChanged;
 "
     if anchor not in ws:
