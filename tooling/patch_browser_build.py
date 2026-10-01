@@ -82,8 +82,7 @@ if "_onDownloadStart;" not in cs:
         raise SystemExit(
             "AndroidNavigationDelegate download listener declaration not found"
         )
-    cs = cs.replace(anchor, field + "
-" + anchor, 1)
+    cs = cs.replace(anchor, field + "\n" + anchor, 1)
 
 old_callback = """      onDownloadStart: (
         _,
@@ -144,8 +143,7 @@ if "Future<void> setOnDownloadStart(" not in cs:
 """
     if getter not in cs:
         raise SystemExit("AndroidNavigationDelegate download getter not found")
-    cs = cs.replace(getter, getter + "
-" + signature, 1)
+    cs = cs.replace(getter, getter + "\n" + signature, 1)
 
 for required in (
     "Future<void> setOnDownloadStart(",
@@ -181,8 +179,7 @@ if "this.onDownloadStart," not in ws:
         raise SystemExit("AdBlockerWebview constructor anchor not found")
     ws = ws.replace(
         constructor_anchor,
-        constructor_anchor + "    this.onDownloadStart,
-",
+        constructor_anchor + "    this.onDownloadStart,\n",
         1,
     )
 
@@ -193,8 +190,7 @@ if "? onDownloadStart;" not in ws:
         raise SystemExit("AdBlockerWebview callback field anchor not found")
     ws = ws.replace(
         field_anchor,
-        field_anchor + "
-" + callback_field,
+        field_anchor + "\n" + callback_field,
         1,
     )
 
