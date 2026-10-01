@@ -774,7 +774,6 @@ class _BrowserPageState extends State<BrowserPage> {
       return;
     }
 
-    _downloadUrls.remove(key);
     if (!_downloadUrls.add(key)) {
       return;
     }

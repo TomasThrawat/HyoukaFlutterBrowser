@@ -37,49 +37,49 @@ if len(android_candidates) != 1:
     raise SystemExit("Expected webview_flutter_android-4.14.1 exactly once")
 controller = android_candidates[0] / "lib" / "src" / "android_webview_controller.dart"
 cs = controller.read_text()
-method = r"""
-  Future<void> setOnDownloadStart(
-    void Function(
-      String url,
-      String userAgent,
-      String contentDisposition,
-      String mimetype,
-      int contentLength,
-    )? onDownloadStart,
-  ) async {
-    if (onDownloadStart == null) {
-      await _webView.setDownloadListener(null);
-      return;
-    }
-    final listener = android_webview.DownloadListener(
-      onDownloadStart: (
-        _,
-        String url,
-        String userAgent,
-        String contentDisposition,
-        String mimetype,
-        int contentLength,
-      ) {
-        onDownloadStart(
-          url,
-          userAgent,
-          contentDisposition,
-          mimetype,
-          contentLength,
-        );
-      },
-    );
-    await _webView.setDownloadListener(listener);
-  }
-
-"""
-if "Future<void> setOnDownloadStart(" not in cs:
-    anchor = """  @override
-  Future<void> runJavaScript(String javaScript) {
-"""
-    if anchor not in cs:
-        raise SystemExit("webview controller insertion anchor not found")
-    cs = cs.replace(anchor, method + anchor, 1)
+method = "\n".join([
+    "  Future<void> setOnDownloadStart(",
+    "    void Function(",
+    "      String url,",
+    "      String userAgent,",
+    "      String contentDisposition,",
+    "      String mimetype,",
+    "      int contentLength,",
+    "    ) onDownloadStart,",
+    "  ) async {",
+    "    final listener = android_webview.DownloadListener(",
+    "      onDownloadStart: (",
+    "        _,",
+    "        String url,",
+    "        String userAgent,",
+    "        String contentDisposition,",
+    "        String mimetype,",
+    "        int contentLength,",
+    "      ) {",
+    "        onDownloadStart(",
+    "          url,",
+    "          userAgent,",
+    "          contentDisposition,",
+    "          mimetype,",
+    "          contentLength,",
+    "        );",
+    "      },",
+    "    );",
+    "    await _webView.setDownloadListener(listener);",
+    "  }",
+    "",
+])
+marker = "  @override\n  Future<void> runJavaScript(String javaScript) {"
+mstart = cs.find("  Future<void> setOnDownloadStart(")
+if mstart >= 0:
+    mend = cs.find(marker, mstart)
+    if mend < 0:
+        raise SystemExit("Existing listener method end anchor not found")
+    cs = cs[:mstart] + method + cs[mend:]
+else:
+    if marker not in cs:
+        raise SystemExit("Controller runJavaScript anchor not found")
+    cs = cs.replace(marker, method + marker, 1)
 controller.write_text(cs)
 
 adblock_candidates = sorted(pubcache.glob("adblocker_webview-2.3.0"))
