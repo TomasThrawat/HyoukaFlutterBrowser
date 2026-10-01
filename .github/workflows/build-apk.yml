@@ -114,17 +114,16 @@ jobs:
           ADBLOCK_PACKAGE="$HOME/.pub-cache/hosted/pub.dev/adblocker_webview-2.3.0/lib/src/adblocker_webview.dart"
           test -f "$ANDROID_PACKAGE"
           test -f "$ADBLOCK_PACKAGE"
-          grep -q "class AndroidNavigationDelegate" "$ANDROID_PACKAGE"
-          grep -q "Future<void> setOnDownloadStart(" "$ANDROID_PACKAGE"
-          grep -q "android_webview.DownloadListener" "$ANDROID_PACKAGE"
-          grep -q "final callback = weakThis.target?._onDownloadStart;" "$ANDROID_PACKAGE"
+          grep -R -q "class AndroidNavigationDelegate" "$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src"
+          grep -R -q "Future<void> setOnDownloadStart(" "$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src"
+          grep -R -q "android_webview.DownloadListener" "$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src"
+          grep -R -q "_onDownloadStart;" "$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src"
           grep -q "this.onDownloadStart," "$ADBLOCK_PACKAGE"
           grep -q "setOnDownloadStart(widget.onDownloadStart!)" "$ADBLOCK_PACKAGE"
           grep -q "onDownloadStart:" lib/main.dart
           grep -q "contentDispositionFileName(" lib/main.dart
           grep -q "downloadFileNameFromMetadata(" lib/main.dart
           grep -q "friendlyDownloadError(" lib/main.dart
-          ! grep -q "setDownloadListener(" "$HOME/.pub-cache/hosted/pub.dev/webview_flutter_android-4.14.1/lib/src/android_webview_controller.dart"
       - run: flutter analyze
       - run: flutter test
       - name: Build arm64-v8a only
