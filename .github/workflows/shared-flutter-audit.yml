@@ -1,0 +1,22 @@
+name: Shared Flutter Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-audit:
+    uses: TomasThrawat/hyouka-flutter-workflows/.github/workflows/flutter-ci.yml@v1
+    with:
+      run-analyze: false
+      run-tests: false
+      check-format: false
+      build-apk: false
+      run-emulator-tests: false
+      run-security-audit: true
+      fail-on-security-findings: false
