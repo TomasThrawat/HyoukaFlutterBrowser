@@ -720,32 +720,6 @@ class _BrowserPageState extends State<BrowserPage> {
     }
   }
 
-  Future<void> _handleWebViewDownload(
-    String url,
-    String userAgent,
-    String contentDisposition,
-    String mimetype,
-    int contentLength,
-  ) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) {
-      return;
-    }
-
-    await _trackDownloadUrl(
-      uri,
-      fileName: downloadFileNameFromMetadata(
-        uri,
-        contentDisposition: contentDisposition,
-        mimeType: mimetype,
-      ),
-      referer: _lastPageUrl,
-      userAgent: userAgent,
-      mimeType: mimetype,
-      contentLength: contentLength,
-    );
-  }
-
   Future<void> _trackDownloadUrl(
     Uri uri, {
     String? fileName,
@@ -1351,7 +1325,6 @@ class _BrowserPageState extends State<BrowserPage> {
                     });
                   },
                   onLoadFinished: _handleLoadFinished,
-                  onDownloadStart: _handleWebViewDownload,
                   onUrlChanged: (url) {
                     if (!mounted) {
                       return;
@@ -1361,10 +1334,17 @@ class _BrowserPageState extends State<BrowserPage> {
                     });
                     final parsedUrl = url == null ? null : Uri.tryParse(url);
                     if (parsedUrl != null) {
-                      if (!isLikelyDownloadUrl(parsedUrl)) {
+                      if (isLikelyDownloadUrl(parsedUrl)) {
+                        unawaited(
+                          _trackDownloadUrl(
+                            parsedUrl,
+                            referer: _lastPageUrl,
+                            userAgent: _browserUserAgent,
+                          ),
+                        );
+                      } else {
                         _lastPageUrl = parsedUrl.toString();
                       }
-                      unawaited(_trackDownloadUrl(parsedUrl));
                     }
                   },
                   onProgress: (value) {
